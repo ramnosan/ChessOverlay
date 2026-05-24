@@ -12,7 +12,6 @@ module Program =
             IsDemo: bool
             TimingEnabled: bool
             PreferGpu: bool
-            ScanAutomatically: bool
             BoardGeometry: BoardGeometry option
             Fen: string option
             PieceReader: string option
@@ -45,7 +44,6 @@ module Program =
             IsDemo = args |> Array.contains "--demo"
             TimingEnabled = args |> Array.contains "--timing"
             PreferGpu = args |> Array.contains "--gpu"
-            ScanAutomatically = args |> Array.contains "--scan"
             BoardGeometry = tryArgumentValue "--board" args |> Option.bind tryParseBoardGeometry
             Fen = tryArgumentValue "--fen" args
             PieceReader = tryArgumentValue "--piece-reader" args
@@ -70,8 +68,6 @@ module Program =
                 "Mode: demo"
             elif options.BoardGeometry.IsSome then
                 "Mode: manual board geometry"
-            elif options.ScanAutomatically then
-                "Mode: scanning for chessboard"
             else
                 "Mode: selected board area"
 
@@ -84,7 +80,6 @@ module Program =
         match options.BoardGeometry with
         | Some geometry -> Some(FixedBoardDetector geometry :> IBoardDetector)
         | None when options.IsDemo -> Some(FixedBoardDetector(centeredDemoGeometry ()) :> IBoardDetector)
-        | None when options.ScanAutomatically -> Some(ConservativeBoardDetector() :> IBoardDetector)
         | None ->
             selectBoardGeometry ()
             |> Option.map (fun geometry -> FixedBoardDetector geometry :> IBoardDetector)
