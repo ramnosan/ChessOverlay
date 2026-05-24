@@ -96,29 +96,32 @@ module Program =
 
     let private defaultSimilarityThreshold = 0.75
 
+    let private createTemplateReader templatesPath =
+        let templates = PieceTemplates.loadFromDirectory templatesPath
+
+        if templates.IsEmpty then
+            UncertainBoardReader() :> IBoardReader, Some(sprintf "No templates found in '%s'" templatesPath)
+        else
+            TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
+
+    let private createFenReader value =
+        FenBoardReader(value) :> IBoardReader, None
+
+    let private configuredFen options environmentFen =
+        [ options.Fen; Option.ofObj environmentFen ]
+        |> List.tryFind (fun value ->
+            value
+            |> Option.exists (String.IsNullOrWhiteSpace >> not))
+        |> Option.flatten
+
     let createReader options environmentFen =
-        match options.Fen, environmentFen with
-        | _ when shouldUseTemplates options ->
-            let templatesPath = options.PieceTemplates |> Option.defaultValue "templates"
-            let templates = PieceTemplates.loadFromDirectory templatesPath
-
-            if templates.IsEmpty then
-                UncertainBoardReader() :> IBoardReader, Some (sprintf "No templates found in '%s'" templatesPath)
-            else
-                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
-        | Some value, _ when not (String.IsNullOrWhiteSpace value) ->
-            FenBoardReader(value) :> IBoardReader, None
-        | _, value when not (String.IsNullOrWhiteSpace value) ->
-            FenBoardReader(value) :> IBoardReader, None
-        | _ when options.IsDemo ->
-            FenBoardReader(startingFen) :> IBoardReader, None
-        | _ ->
-            let templates = PieceTemplates.loadFromDirectory "templates"
-
-            if templates.IsEmpty then
-                UncertainBoardReader() :> IBoardReader, Some "No templates found in 'templates'"
-            else
-                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
+        if shouldUseTemplates options then
+            createTemplateReader (options.PieceTemplates |> Option.defaultValue "templates")
+        else
+            match configuredFen options environmentFen with
+            | Some value -> createFenReader value
+            | None when options.IsDemo -> createFenReader startingFen
+            | None -> createTemplateReader "templates"
 
     let statusWithWarning status warning =
         warning

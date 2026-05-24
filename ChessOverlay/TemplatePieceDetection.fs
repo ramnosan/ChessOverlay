@@ -8,55 +8,48 @@ open System.IO
 open System.Runtime.InteropServices
 
 module PieceTemplates =
+    let private colors =
+        [|
+            "white", Bottom
+            "black", Top
+            "w", Bottom
+            "b", Top
+        |]
+        |> Map.ofArray
+
+    let private kinds =
+        Map.ofList [
+            "king", King
+            "queen", Queen
+            "rook", Rook
+            "bishop", Bishop
+            "knight", Knight
+            "pawn", Pawn
+            "k", King
+            "q", Queen
+            "r", Rook
+            "b", Bishop
+            "n", Knight
+            "p", Pawn
+        ]
+
     let private tryParsePiece (filename: string) =
         let name = Path.GetFileNameWithoutExtension(filename).ToLowerInvariant()
 
-        let shortFormat () =
+        let parts =
             if name.Length = 2 then
-                let color =
-                    match name[0] with
-                    | 'w' -> Some Bottom
-                    | 'b' -> Some Top
-                    | _ -> None
-
-                let kind =
-                    match name[1] with
-                    | 'k' -> Some King
-                    | 'q' -> Some Queen
-                    | 'r' -> Some Rook
-                    | 'b' -> Some Bishop
-                    | 'n' -> Some Knight
-                    | 'p' -> Some Pawn
-                    | _ -> None
-
-                Option.map2 (fun c k -> { Color = c; Kind = k }) color kind
+                [ string name[0]; string name[1] ]
             else
-                None
+                name.Split('_', StringSplitOptions.RemoveEmptyEntries)
+                |> Array.toList
 
-        let longFormat () =
-            let color =
-                if name.StartsWith("white_") then Some Bottom
-                elif name.StartsWith("black_") then Some Top
-                else None
-
-            let rest =
-                name.Replace("white_", "").Replace("black_", "")
-
-            let kind =
-                match rest with
-                | "king" -> Some King
-                | "queen" -> Some Queen
-                | "rook" -> Some Rook
-                | "bishop" -> Some Bishop
-                | "knight" -> Some Knight
-                | "pawn" -> Some Pawn
-                | _ -> None
-
-            Option.map2 (fun c k -> { Color = c; Kind = k }) color kind
-
-        match shortFormat () with
-        | Some piece -> Some piece
-        | None -> longFormat ()
+        match parts with
+        | [ colorName; kindName ] ->
+            Option.map2
+                (fun color kind -> { Color = color; Kind = kind })
+                (Map.tryFind colorName colors)
+                (Map.tryFind kindName kinds)
+        | _ -> None
 
     let loadFromDirectory (path: string) : Map<Piece, Bitmap> =
         if not (Directory.Exists path) then

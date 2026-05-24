@@ -41,6 +41,7 @@ module CrapMetric =
 
     let private inlineCommentPattern = Regex(@"//.*$", RegexOptions.Compiled)
     let private quotedNamePattern = Regex("^``(.+)``$", RegexOptions.Compiled)
+    let private excludeCoverageAttribute = "ExcludeFromCodeCoverage"
 
     let private normalizePath (path: string) =
         Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
@@ -81,6 +82,36 @@ module CrapMetric =
 
     let private codeOnly line =
         line |> stripComments |> stripStrings
+
+    let private hasExcludeAttribute (line: string) =
+        line.Contains(excludeCoverageAttribute, StringComparison.Ordinal)
+
+    let private previousCodeLine (indexedLines: (int * string) list) lineNumber =
+        indexedLines
+        |> List.rev
+        |> List.tryFind (fun (currentLineNumber, line) ->
+            currentLineNumber < lineNumber && not (String.IsNullOrWhiteSpace line))
+
+    let private isExcludedByAttribute indexedLines startLine startIndent =
+        let directlyExcluded =
+            previousCodeLine indexedLines startLine
+            |> Option.exists (snd >> hasExcludeAttribute)
+
+        let enclosingExcluded =
+            indexedLines
+            |> List.rev
+            |> List.tryPick (fun (lineNumber, line) ->
+                if lineNumber >= startLine || String.IsNullOrWhiteSpace line then
+                    None
+                elif indentation line < startIndent && structuralBoundaryPattern.IsMatch line then
+                    Some(
+                        previousCodeLine indexedLines lineNumber
+                        |> Option.exists (snd >> hasExcludeAttribute))
+                else
+                    None)
+            |> Option.defaultValue false
+
+        directlyExcluded || enclosingExcluded
 
     let private decisionCount (lines: string list) =
         let countRegex pattern (line: string) =
@@ -132,11 +163,16 @@ module CrapMetric =
                 else
                     None)
 
-        starts
+        let includedStarts =
+            starts
+            |> List.filter (fun (startLine, startIndent, _) ->
+                not (isExcludedByAttribute indexedLines startLine startIndent))
+
+        includedStarts
         |> List.mapi (fun index (startLine, startIndent, name) ->
             let endLine =
                 let nextFunction =
-                    starts
+                    includedStarts
                     |> List.skip (index + 1)
                     |> List.tryFind (fun (_, indent, _) -> indent <= startIndent)
                     |> Option.map (fun (lineNumber, _, _) -> lineNumber)

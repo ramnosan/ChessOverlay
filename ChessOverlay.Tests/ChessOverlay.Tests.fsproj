@@ -8,9 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="TestHelpers.fs" />
     <Compile Include="DomainTests.fs" />
     <Compile Include="AttackCalculatorTests.fs" />
     <Compile Include="BoardDetectionTests.fs" />
+    <Compile Include="TemplatePieceDetectionTests.fs" />
     <Compile Include="CrapMetricTests.fs" />
     <Compile Include="DryDuplicationTests.fs" />
     <Compile Include="ArchitectureViewTests.fs" />

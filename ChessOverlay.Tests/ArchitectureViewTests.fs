@@ -4,12 +4,11 @@ open System
 open System.IO
 open Xunit
 open ChessOverlay.Quality
+open ChessOverlay.Tests
 
 module ArchitectureViewTests =
     let private tempRoot () =
-        let root = Path.Combine(Path.GetTempPath(), "ChessOverlayArchTests", Guid.NewGuid().ToString("N"))
-        Directory.CreateDirectory(root) |> ignore
-        root
+        TestHelpers.tempRoot "ChessOverlayArchTests"
 
     let private writeFile root relativePath (lines: string list) =
         let path = Path.Combine(root, relativePath)

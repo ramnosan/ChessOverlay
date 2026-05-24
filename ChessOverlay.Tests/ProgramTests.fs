@@ -21,6 +21,9 @@ module ProgramTests =
         Assert.True(options.TimingEnabled)
         Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, options.BoardGeometry)
         Assert.Equal(Some "8/8/8/8/8/8/8/8 w - - 0 1", options.Fen)
+        Assert.True(Program.tryParseBoardGeometry("10,20") |> Option.isNone)
+        Assert.True(Program.tryParseBoardGeometry("10,20,0") |> Option.isNone)
+        Assert.True(Program.tryParseBoardGeometry("10,top,300") |> Option.isNone)
 
     [<Fact>]
     let ``Startup status describes selected mode and timing`` () =

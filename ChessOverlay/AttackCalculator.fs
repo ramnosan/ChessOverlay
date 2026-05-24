@@ -53,19 +53,24 @@ module AttackCalculator =
     let private rookDirections =
         [ -1, 0; 1, 0; 0, -1; 0, 1 ]
 
+    let private queenDirections = bishopDirections @ rookDirections
+
     let private slidingAttacks board square directions =
         directions
         |> List.map (fun (fileDelta, rankDelta) -> rayAttacks board square fileDelta rankDelta)
         |> Set.unionMany
 
     let attacksForPiece board square piece =
-        match piece.Kind with
-        | Pawn -> pawnAttacks square
-        | Knight -> knightAttacks square
-        | Bishop -> slidingAttacks board square bishopDirections
-        | Rook -> slidingAttacks board square rookDirections
-        | Queen -> slidingAttacks board square (bishopDirections @ rookDirections)
-        | King -> kingAttacks square
+        Map.ofList [
+            Pawn, pawnAttacks
+            Knight, knightAttacks
+            Bishop, fun target -> slidingAttacks board target bishopDirections
+            Rook, fun target -> slidingAttacks board target rookDirections
+            Queen, fun target -> slidingAttacks board target queenDirections
+            King, kingAttacks
+        ]
+        |> Map.find piece.Kind
+        <| square
 
     let enemyAttackedSquares (board: BoardState) =
         board
