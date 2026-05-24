@@ -12,12 +12,12 @@ module Program =
             IsDemo: bool
             TimingEnabled: bool
             PreferGpu: bool
-            ScanAutomatically: bool
             BoardGeometry: BoardGeometry option
             Fen: string option
             PieceReader: string option
             PieceModel: string option
             PieceLabels: string option
+            PieceTemplates: string option
         }
 
     let tryArgumentValue name (args: string array) =
@@ -45,12 +45,12 @@ module Program =
             IsDemo = args |> Array.contains "--demo"
             TimingEnabled = args |> Array.contains "--timing"
             PreferGpu = args |> Array.contains "--gpu"
-            ScanAutomatically = args |> Array.contains "--scan"
             BoardGeometry = tryArgumentValue "--board" args |> Option.bind tryParseBoardGeometry
             Fen = tryArgumentValue "--fen" args
             PieceReader = tryArgumentValue "--piece-reader" args
             PieceModel = tryArgumentValue "--piece-model" args
             PieceLabels = tryArgumentValue "--piece-labels" args
+            PieceTemplates = tryArgumentValue "--piece-templates" args
         }
 
     [<ExcludeFromCodeCoverage>]
@@ -70,8 +70,6 @@ module Program =
                 "Mode: demo"
             elif options.BoardGeometry.IsSome then
                 "Mode: manual board geometry"
-            elif options.ScanAutomatically then
-                "Mode: scanning for chessboard"
             else
                 "Mode: selected board area"
 
@@ -84,7 +82,6 @@ module Program =
         match options.BoardGeometry with
         | Some geometry -> Some(FixedBoardDetector geometry :> IBoardDetector)
         | None when options.IsDemo -> Some(FixedBoardDetector(centeredDemoGeometry ()) :> IBoardDetector)
-        | None when options.ScanAutomatically -> Some(ConservativeBoardDetector() :> IBoardDetector)
         | None ->
             selectBoardGeometry ()
             |> Option.map (fun geometry -> FixedBoardDetector geometry :> IBoardDetector)
@@ -103,6 +100,12 @@ module Program =
         options.PieceReader = Some "yolo"
         || (options.PieceModel.IsSome && options.PieceLabels.IsSome)
 
+    let private shouldUseTemplates options =
+        options.PieceReader = Some "template"
+        || options.PieceTemplates.IsSome
+
+    let private defaultSimilarityThreshold = 0.75
+
     let createReader options environmentFen registerDisposable =
         match options.Fen, environmentFen with
         | _ when shouldUseYolo options ->
@@ -115,6 +118,14 @@ module Program =
                 YoloBoardReader(yoloDetector :> IYoloObjectDetector, labels) :> IBoardReader, None
             | _ ->
                 UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
+        | _ when shouldUseTemplates options ->
+            let templatesPath = options.PieceTemplates |> Option.defaultValue "templates"
+            let templates = PieceTemplates.loadFromDirectory templatesPath
+
+            if templates.IsEmpty then
+                UncertainBoardReader() :> IBoardReader, Some (sprintf "No templates found in '%s'" templatesPath)
+            else
+                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
         | Some value, _ when not (String.IsNullOrWhiteSpace value) ->
             FenBoardReader(value) :> IBoardReader, None
         | _, value when not (String.IsNullOrWhiteSpace value) ->
@@ -122,7 +133,12 @@ module Program =
         | _ when options.IsDemo ->
             FenBoardReader(startingFen) :> IBoardReader, None
         | _ ->
-            UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
+            let templates = PieceTemplates.loadFromDirectory "templates"
+
+            if templates.IsEmpty then
+                UncertainBoardReader() :> IBoardReader, Some "No templates found in 'templates'"
+            else
+                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
 
     let statusWithWarning status warning =
         warning

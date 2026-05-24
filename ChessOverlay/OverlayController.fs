@@ -66,6 +66,7 @@ type OverlayController(
                                     {
                                         Geometry = screenGeometry
                                         HighlightedSquares = attackedSquares
+                                        DetectedPieces = Some reading.Board
                                     })
                     | _ -> measure "overlay-update" (fun () -> overlay.ShowUncertainBoard screenGeometry)
             finally
