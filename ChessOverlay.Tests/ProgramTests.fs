@@ -76,6 +76,23 @@ module ProgramTests =
         Assert.True(warning.IsNone)
 
     [<Fact>]
+    let ``Reader creation uses requested yolo before FEN fallbacks`` () =
+        let options =
+            Program.parseStartupOptions
+                [|
+                    "--piece-reader"
+                    "yolo"
+                    "--fen"
+                    "8/8/8/8/8/8/8/8 w - - 0 1"
+                |]
+
+        let reader, warning =
+            Program.createReader options "8/8/8/8/8/8/8/8 w - - 0 1" ignore
+
+        Assert.IsType<UncertainBoardReader>(reader) |> ignore
+        Assert.Equal(Some "YOLO model or labels missing", warning)
+
+    [<Fact>]
     let ``Reader creation uses environment FEN when command line FEN is absent`` () =
         let options = Program.parseStartupOptions [||]
 

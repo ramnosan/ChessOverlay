@@ -105,20 +105,22 @@ module Program =
 
     let createReader options environmentFen registerDisposable =
         match options.Fen, environmentFen with
+        | _ when shouldUseYolo options ->
+            match options.PieceModel, options.PieceLabels with
+            | Some modelPath, Some labelsPath when IO.File.Exists modelPath && IO.File.Exists labelsPath ->
+                let labels = YoloLabels.load labelsPath
+                let classCount = YoloLabels.classCount labels
+                let yoloDetector = new OnnxYoloObjectDetector(modelPath, options.PreferGpu, ?classCount = classCount)
+                registerDisposable (yoloDetector :> IDisposable)
+                YoloBoardReader(yoloDetector :> IYoloObjectDetector, labels) :> IBoardReader, None
+            | _ ->
+                UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
         | Some value, _ when not (String.IsNullOrWhiteSpace value) ->
             FenBoardReader(value) :> IBoardReader, None
         | _, value when not (String.IsNullOrWhiteSpace value) ->
             FenBoardReader(value) :> IBoardReader, None
         | _ when options.IsDemo ->
             FenBoardReader(startingFen) :> IBoardReader, None
-        | _ when shouldUseYolo options ->
-            match options.PieceModel, options.PieceLabels with
-            | Some modelPath, Some labelsPath when IO.File.Exists modelPath && IO.File.Exists labelsPath ->
-                let yoloDetector = new OnnxYoloObjectDetector(modelPath, options.PreferGpu)
-                registerDisposable (yoloDetector :> IDisposable)
-                YoloBoardReader(yoloDetector :> IYoloObjectDetector, YoloLabels.load labelsPath) :> IBoardReader, None
-            | _ ->
-                UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
         | _ ->
             UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
 

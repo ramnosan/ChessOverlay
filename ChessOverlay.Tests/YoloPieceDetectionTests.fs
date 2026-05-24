@@ -38,6 +38,20 @@ module YoloPieceDetectionTests =
         Assert.Equal(Some "black_pawn", YoloLabels.load objectPath |> Map.tryFind 2)
 
     [<Fact>]
+    let ``Labels load Ultralytics names formats`` () =
+        let tempDirectory = Path.Combine(Path.GetTempPath(), "ChessOverlayYoloTests", Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(tempDirectory) |> ignore
+        let arrayPath = Path.Combine(tempDirectory, "names-array.json")
+        let objectPath = Path.Combine(tempDirectory, "names-object.json")
+
+        File.WriteAllText(arrayPath, """{"names":["black_queen","white_knight"]}""")
+        File.WriteAllText(objectPath, """{"names":{"0":"black_queen","1":{"name":"white_knight"}}}""")
+
+        Assert.Equal(Some "black_queen", YoloLabels.load arrayPath |> Map.tryFind 0)
+        Assert.Equal(Some "white_knight", YoloLabels.load arrayPath |> Map.tryFind 1)
+        Assert.Equal(Some 2, YoloLabels.load objectPath |> YoloLabels.classCount)
+
+    [<Fact>]
     let ``Labels ignore unsupported JSON label values`` () =
         let tempDirectory = Path.Combine(Path.GetTempPath(), "ChessOverlayYoloTests", Guid.NewGuid().ToString("N"))
         Directory.CreateDirectory(tempDirectory) |> ignore
@@ -67,6 +81,10 @@ module YoloPieceDetectionTests =
             Assert.Equal(Some { Color = Top; Kind = Queen }, BoardState.tryPieceAt { File = 2; Rank = 1 } reading.Board)
             Assert.Equal(Some { Color = Bottom; Kind = Knight }, BoardState.tryPieceAt { File = 5; Rank = 6 } reading.Board)
         | None -> failwith "Expected confident detections to produce a board reading."
+
+    [<Fact>]
+    let ``Post processing rejects no mapped pieces`` () =
+        Assert.True(YoloPostProcessing.toBoardReading labels 0.45 0.45 640 [] |> Option.isNone)
 
     [<Fact>]
     let ``Post processing rejects duplicate square detections`` () =
@@ -138,6 +156,28 @@ module YoloPieceDetectionTests =
         let detection = Assert.Single detections
         Assert.Equal(1, detection.ClassIndex)
         Assert.Equal(0.45, detection.Confidence, 2)
+        Assert.Equal(RectangleF(280.0f, 80.0f, 80.0f, 160.0f), detection.Bounds)
+
+    [<Fact>]
+    let ``Output parser uses class count to read YOLOv8 tensors without objectness`` () =
+        let tensor = DenseTensor<float32>([| 1; 84; 100 |])
+        tensor[0, 0, 0] <- 0.5f
+        tensor[0, 1, 0] <- 0.25f
+        tensor[0, 2, 0] <- 0.125f
+        tensor[0, 3, 0] <- 0.25f
+        tensor[0, 4, 0] <- 0.10f
+        tensor[0, 14, 0] <- 0.90f
+
+        let detections =
+            YoloOutputParser.parseWithClassCount
+                (Some 80)
+                { InputSize = 640; ConfidenceThreshold = 0.45 }
+                640
+                tensor
+
+        let detection = Assert.Single detections
+        Assert.Equal(10, detection.ClassIndex)
+        Assert.Equal(0.90, detection.Confidence, 2)
         Assert.Equal(RectangleF(280.0f, 80.0f, 80.0f, 160.0f), detection.Bounds)
 
     [<Fact>]

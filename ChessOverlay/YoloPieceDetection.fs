@@ -90,14 +90,42 @@ module YoloLabels =
         |> Seq.choose objectLabel
         |> Map.ofSeq
 
+    let private namesLabels (root: JsonElement) =
+        let mutable namesProperty = Unchecked.defaultof<JsonElement>
+
+        if root.TryGetProperty("names", &namesProperty) then
+            match namesProperty.ValueKind with
+            | JsonValueKind.Array -> arrayLabels namesProperty
+            | JsonValueKind.Object -> objectLabels namesProperty
+            | _ -> Map.empty
+        else
+            Map.empty
+
     let load (path: string) =
         let text = IO.File.ReadAllText(path)
         use document = JsonDocument.Parse(text)
 
         match document.RootElement.ValueKind with
         | JsonValueKind.Array -> arrayLabels document.RootElement
-        | JsonValueKind.Object -> objectLabels document.RootElement
+        | JsonValueKind.Object ->
+            let labels = objectLabels document.RootElement
+
+            if Map.isEmpty labels then
+                namesLabels document.RootElement
+            else
+                labels
         | _ -> Map.empty
+
+    let classCount labels =
+        if Map.isEmpty labels then
+            None
+        else
+            labels
+            |> Map.toSeq
+            |> Seq.map fst
+            |> Seq.max
+            |> (+) 1
+            |> Some
 
 module YoloPostProcessing =
     let private center (rect: RectangleF) =
@@ -169,7 +197,7 @@ module YoloPostProcessing =
             |> List.countBy (fun (square, _, _) -> square)
             |> List.exists (fun (_, count) -> count > 1)
 
-        if duplicateSquare then
+        if Map.isEmpty labelsByClass || List.isEmpty mapped || duplicateSquare then
             None
         else
             let board =
@@ -214,9 +242,15 @@ module YoloOutputParser =
             else
                 Some(featureMajor, featureCount, detectionCount)
 
-    let private detectionAt options boardSize values featureMajor featureCount detectionCount anchor =
-        let hasObjectness = featureCount > 16
-        let classStart = if hasObjectness then 5 else 4
+    let private classStartFor classCount featureCount =
+        match classCount with
+        | Some count when featureCount = count + 4 -> 4
+        | Some count when featureCount = count + 5 -> 5
+        | _ when featureCount > 16 -> 5
+        | _ -> 4
+
+    let private detectionAt options classCount boardSize values featureMajor featureCount detectionCount anchor =
+        let classStart = classStartFor classCount featureCount
         let classCount = featureCount - classStart
         let scale = float32 boardSize / float32 options.InputSize
 
@@ -225,7 +259,7 @@ module YoloOutputParser =
         let cy = value 1 featureMajor
         let width = value 2 featureMajor
         let height = value 3 featureMajor
-        let objectness = if hasObjectness then value 4 featureMajor else 1.0f
+        let objectness = if classStart = 5 then value 4 featureMajor else 1.0f
 
         let bestClass, bestClassScore =
             [ 0 .. classCount - 1 ]
@@ -258,19 +292,25 @@ module YoloOutputParser =
                     Bounds = RectangleF(left, top, boxWidth, boxHeight)
                 }
 
-    let parse options boardSize (tensor: Tensor<float32>) =
+    let private parseCore options classCount boardSize (tensor: Tensor<float32>) =
         let values = tensor |> Seq.toArray
 
         match dimensionsOf tensor |> outputShape with
         | None -> []
         | Some(featureMajor, featureCount, detectionCount) ->
             [ for anchor in 0 .. detectionCount - 1 do
-                  match detectionAt options boardSize values featureMajor featureCount detectionCount anchor with
+                  match detectionAt options classCount boardSize values featureMajor featureCount detectionCount anchor with
                   | Some detection -> detection
                   | None -> () ]
 
+    let parse options boardSize (tensor: Tensor<float32>) =
+        parseCore options None boardSize tensor
+
+    let parseWithClassCount classCount options boardSize (tensor: Tensor<float32>) =
+        parseCore options classCount boardSize tensor
+
 [<ExcludeFromCodeCoverage>]
-type OnnxYoloObjectDetector(modelPath: string, preferGpu: bool, ?inputSize: int, ?confidenceThreshold: float) =
+type OnnxYoloObjectDetector(modelPath: string, preferGpu: bool, ?inputSize: int, ?confidenceThreshold: float, ?classCount: int) =
     let inputSize = defaultArg inputSize 640
     let confidenceThreshold = defaultArg confidenceThreshold 0.25
 
@@ -317,7 +357,11 @@ type OnnxYoloObjectDetector(modelPath: string, preferGpu: bool, ?inputSize: int,
         tensor
 
     let parseOutput (boardSize: int) (tensor: Tensor<float32>) =
-        YoloOutputParser.parse { InputSize = inputSize; ConfidenceThreshold = confidenceThreshold } boardSize tensor
+        YoloOutputParser.parseWithClassCount
+            classCount
+            { InputSize = inputSize; ConfidenceThreshold = confidenceThreshold }
+            boardSize
+            tensor
 
     interface IYoloObjectDetector with
         member _.Detect(bitmap: Bitmap) =
