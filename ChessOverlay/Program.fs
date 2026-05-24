@@ -11,12 +11,9 @@ module Program =
         {
             IsDemo: bool
             TimingEnabled: bool
-            PreferGpu: bool
             BoardGeometry: BoardGeometry option
             Fen: string option
             PieceReader: string option
-            PieceModel: string option
-            PieceLabels: string option
             PieceTemplates: string option
         }
 
@@ -44,12 +41,9 @@ module Program =
         {
             IsDemo = args |> Array.contains "--demo"
             TimingEnabled = args |> Array.contains "--timing"
-            PreferGpu = args |> Array.contains "--gpu"
             BoardGeometry = tryArgumentValue "--board" args |> Option.bind tryParseBoardGeometry
             Fen = tryArgumentValue "--fen" args
             PieceReader = tryArgumentValue "--piece-reader" args
-            PieceModel = tryArgumentValue "--piece-model" args
-            PieceLabels = tryArgumentValue "--piece-labels" args
             PieceTemplates = tryArgumentValue "--piece-templates" args
         }
 
@@ -96,28 +90,14 @@ module Program =
         else
             None
 
-    let private shouldUseYolo options =
-        options.PieceReader = Some "yolo"
-        || (options.PieceModel.IsSome && options.PieceLabels.IsSome)
-
     let private shouldUseTemplates options =
         options.PieceReader = Some "template"
         || options.PieceTemplates.IsSome
 
     let private defaultSimilarityThreshold = 0.75
 
-    let createReader options environmentFen registerDisposable =
+    let createReader options environmentFen =
         match options.Fen, environmentFen with
-        | _ when shouldUseYolo options ->
-            match options.PieceModel, options.PieceLabels with
-            | Some modelPath, Some labelsPath when IO.File.Exists modelPath && IO.File.Exists labelsPath ->
-                let labels = YoloLabels.load labelsPath
-                let classCount = YoloLabels.classCount labels
-                let yoloDetector = new OnnxYoloObjectDetector(modelPath, options.PreferGpu, ?classCount = classCount)
-                registerDisposable (yoloDetector :> IDisposable)
-                YoloBoardReader(yoloDetector :> IYoloObjectDetector, labels) :> IBoardReader, None
-            | _ ->
-                UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
         | _ when shouldUseTemplates options ->
             let templatesPath = options.PieceTemplates |> Option.defaultValue "templates"
             let templates = PieceTemplates.loadFromDirectory templatesPath
@@ -148,13 +128,11 @@ module Program =
     [<ExcludeFromCodeCoverage>]
     let private runOverlay options detector =
         use overlay = new OverlayWindow()
-        let mutable disposableReaderDependency: IDisposable option = None
 
         let reader, warning =
             createReader
                 options
                 (Environment.GetEnvironmentVariable "CHESS_OVERLAY_FEN")
-                (fun disposable -> disposableReaderDependency <- Some disposable)
 
         use controller = new OverlayController(detector, reader, overlay, timingEnabled = options.TimingEnabled)
         overlay.Load.Add(fun _ ->
@@ -162,7 +140,6 @@ module Program =
             controller.Start())
 
         Application.Run overlay
-        disposableReaderDependency |> Option.iter _.Dispose()
         0
 
     [<STAThread>]

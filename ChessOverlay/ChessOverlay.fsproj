@@ -11,7 +11,6 @@
     <Compile Include="AttackCalculator.fs" />
     <Compile Include="BoardDetection.fs" />
     <Compile Include="TemplatePieceDetection.fs" />
-    <Compile Include="YoloPieceDetection.fs" />
     <Compile Include="OverlayWindow.fs" />
     <Compile Include="OverlayController.fs" />
     <Compile Include="BoardSelectionWindow.fs" />
@@ -20,10 +19,6 @@
 
   <ItemGroup>
     <None Include="..\specification.md" Link="specification.md" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.22.1" />
   </ItemGroup>
 
 </Project>
