@@ -4,11 +4,12 @@ open System
 open System.Diagnostics
 open System.Diagnostics.CodeAnalysis
 open System.Drawing
+open System.Threading.Tasks
 open System.Windows.Forms
 
 [<ExcludeFromCodeCoverage>]
 type OverlayController(
-    detector: IBoardDetector,
+    boardGeometry: BoardGeometry,
     reader: IBoardReader,
     overlay: OverlayWindow,
     ?timingEnabled: bool,
@@ -18,6 +19,7 @@ type OverlayController(
     let timingEnabled = defaultArg timingEnabled false
     let confidenceThreshold = 0.45
     let timer = new Timer(Interval = scanInterval)
+    let scanGate = obj ()
     let mutable scanInProgress = false
 
     let toVirtualScreenGeometry (origin: Point) (geometry: BoardGeometry) =
@@ -37,47 +39,66 @@ type OverlayController(
 
         result
 
-    let readBoardGeometry capture =
-        match detector with
-        | :? FixedBoardDetector as fixedDetector -> BoardDetected fixedDetector.Geometry
-        | _ -> measure "board-detection" (fun () -> detector.Detect capture)
+    let updateOverlay action =
+        if overlay.IsHandleCreated && not overlay.IsDisposed then
+            overlay.BeginInvoke(MethodInvoker action) |> ignore
+
+    let uncertainStatus reading =
+        match reader, reading with
+        | :? UncertainBoardReader, _ -> "Board selected - no piece templates loaded"
+        | _, None -> "Board selected - piece reader unavailable"
+        | _, Some boardReading when boardReading.Board.IsEmpty -> "Board selected - 0 pieces matched"
+        | _, Some boardReading -> sprintf "Board selected - only %i pieces matched" boardReading.Board.Count
 
     let scanOnce () =
-        if not scanInProgress then
-            scanInProgress <- true
+        try
+            let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
+            use capture = capturedBitmap
 
-            try
-                let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
-                use capture = capturedBitmap
+            let screenGeometry = toVirtualScreenGeometry origin boardGeometry
 
-                match readBoardGeometry capture with
-                | BoardNotFound -> measure "overlay-update" (fun () -> overlay.ShowSearching())
-                | BoardDetected geometry ->
-                    let screenGeometry = toVirtualScreenGeometry origin geometry
+            let reading = measure "piece-reading" (fun () -> reader.Read(capture, boardGeometry))
 
-                    match measure "piece-reading" (fun () -> reader.Read(capture, geometry)) with
-                    | Some reading when reading.Confidence >= confidenceThreshold ->
-                        let attackedSquares = AttackCalculator.enemyAttackedSquares reading.Board
+            match reading with
+            | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
+                let attackedSquares = AttackCalculator.enemyAttackedSquares boardReading.Board
 
-                        measure
-                            "overlay-update"
+                measure
+                    "overlay-update"
+                    (fun () ->
+                        updateOverlay
                             (fun () ->
                                 overlay.ShowFrame
                                     {
                                         Geometry = screenGeometry
                                         HighlightedSquares = attackedSquares
-                                        DetectedPieces = Some reading.Board
-                                    })
-                    | _ -> measure "overlay-update" (fun () -> overlay.ShowUncertainBoard screenGeometry)
-            finally
-                scanInProgress <- false
+                                        DetectedPieces = Some boardReading.Board
+                                    }))
+            | _ ->
+                let status = uncertainStatus reading
+                measure "overlay-update" (fun () -> updateOverlay (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
+        finally
+            lock scanGate (fun () ->
+                scanInProgress <- false)
+
+    let startScan () =
+        let shouldStart =
+            lock scanGate (fun () ->
+                if scanInProgress then
+                    false
+                else
+                    scanInProgress <- true
+                    true)
+
+        if shouldStart then
+            Task.Run(fun () -> scanOnce ()) |> ignore
 
     do
-        timer.Tick.Add(fun _ -> scanOnce ())
+        timer.Tick.Add(fun _ -> startScan ())
 
     member _.Start() =
-        scanOnce ()
         timer.Start()
+        startScan ()
 
     member _.Stop() = timer.Stop()
 

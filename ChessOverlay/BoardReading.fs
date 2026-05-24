@@ -3,9 +3,6 @@ namespace ChessOverlay
 open System.Diagnostics.CodeAnalysis
 open System.Drawing
 
-type IBoardDetector =
-    abstract Detect: Bitmap -> DetectionResult
-
 type IBoardReader =
     abstract Read: Bitmap * BoardGeometry -> BoardReading option
 
@@ -19,12 +16,6 @@ type FenBoardReader(fen: string) =
 type UncertainBoardReader() =
     interface IBoardReader with
         member _.Read(_, _) = None
-
-type FixedBoardDetector(geometry: BoardGeometry) =
-    member _.Geometry = geometry
-
-    interface IBoardDetector with
-        member _.Detect(_) = BoardDetected geometry
 
 [<ExcludeFromCodeCoverage>]
 module ScreenCapture =

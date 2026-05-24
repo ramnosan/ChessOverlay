@@ -9,7 +9,7 @@
   <ItemGroup>
     <Compile Include="Domain.fs" />
     <Compile Include="AttackCalculator.fs" />
-    <Compile Include="BoardDetection.fs" />
+    <Compile Include="BoardReading.fs" />
     <Compile Include="TemplatePieceDetection.fs" />
     <Compile Include="OverlayWindow.fs" />
     <Compile Include="OverlayController.fs" />

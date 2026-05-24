@@ -15,6 +15,7 @@ module Program =
             Fen: string option
             PieceReader: string option
             PieceTemplates: string option
+            CalibrateTemplates: bool
         }
 
     let tryArgumentValue name (args: string array) =
@@ -45,6 +46,7 @@ module Program =
             Fen = tryArgumentValue "--fen" args
             PieceReader = tryArgumentValue "--piece-reader" args
             PieceTemplates = tryArgumentValue "--piece-templates" args
+            CalibrateTemplates = args |> Array.contains "--calibrate-templates"
         }
 
     [<ExcludeFromCodeCoverage>]
@@ -69,16 +71,16 @@ module Program =
 
         if options.TimingEnabled then
             mode + " - timing enabled"
+        elif options.CalibrateTemplates then
+            mode + " - calibrating templates"
         else
             mode
 
-    let tryCreateDetector options selectBoardGeometry =
+    let tryGetBoardGeometry options selectBoardGeometry =
         match options.BoardGeometry with
-        | Some geometry -> Some(FixedBoardDetector geometry :> IBoardDetector)
-        | None when options.IsDemo -> Some(FixedBoardDetector(centeredDemoGeometry ()) :> IBoardDetector)
-        | None ->
-            selectBoardGeometry ()
-            |> Option.map (fun geometry -> FixedBoardDetector geometry :> IBoardDetector)
+        | Some geometry -> Some geometry
+        | None when options.IsDemo -> Some(centeredDemoGeometry ())
+        | None -> selectBoardGeometry ()
 
     [<ExcludeFromCodeCoverage>]
     let private selectBoardGeometry () =
@@ -94,12 +96,15 @@ module Program =
         options.PieceReader = Some "template"
         || options.PieceTemplates.IsSome
 
+    let private templatePath options =
+        options.PieceTemplates |> Option.defaultValue "templates"
+
     let private defaultSimilarityThreshold = 0.75
 
     let private createTemplateReader templatesPath =
-        let templates = PieceTemplates.loadFromDirectory templatesPath
+        let templates = PieceTemplates.loadAllFromDirectory templatesPath
 
-        if templates.IsEmpty then
+        if Array.isEmpty templates then
             UncertainBoardReader() :> IBoardReader, Some(sprintf "No templates found in '%s'" templatesPath)
         else
             TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
@@ -116,12 +121,45 @@ module Program =
 
     let createReader options environmentFen =
         if shouldUseTemplates options then
-            createTemplateReader (options.PieceTemplates |> Option.defaultValue "templates")
+            createTemplateReader (templatePath options)
         else
             match configuredFen options environmentFen with
             | Some value -> createFenReader value
             | None when options.IsDemo -> createFenReader startingFen
             | None -> createTemplateReader "templates"
+
+    [<ExcludeFromCodeCoverage>]
+    let private templateCount path =
+        let templates = PieceTemplates.loadAllFromDirectory path
+
+        try
+            templates.Length
+        finally
+            templates |> Array.iter (fun (_, bitmap) -> bitmap.Dispose())
+
+    [<ExcludeFromCodeCoverage>]
+    let private shouldCalibrateTemplates options environmentFen =
+        let path = templatePath options
+
+        options.CalibrateTemplates
+        || configuredFen options environmentFen |> Option.isNone
+           && not options.IsDemo
+           && templateCount path = 0
+
+    [<ExcludeFromCodeCoverage>]
+    let private calibrateTemplates options environmentFen geometry =
+        if not (shouldCalibrateTemplates options environmentFen) then
+            None
+        else
+            let path = templatePath options
+            let capturedBitmap, _ = ScreenCapture.captureVirtualScreen ()
+            use capture = capturedBitmap
+            let savedCount = PieceTemplateCalibration.saveStartingPositionTemplates capture geometry path
+
+            if savedCount = 32 then
+                Some(sprintf "Calibrated 32 starting-position templates in '%s'" path)
+            else
+                Some(sprintf "Calibrated %i of 32 templates in '%s'; start from a normal initial board" savedCount path)
 
     let statusWithWarning status warning =
         warning
@@ -129,15 +167,25 @@ module Program =
         |> Option.defaultValue status
 
     [<ExcludeFromCodeCoverage>]
-    let private runOverlay options detector =
+    let private runOverlay options boardGeometry =
         use overlay = new OverlayWindow()
+        let environmentFen = Environment.GetEnvironmentVariable "CHESS_OVERLAY_FEN"
+
+        let calibrationWarning = calibrateTemplates options environmentFen boardGeometry
 
         let reader, warning =
             createReader
                 options
-                (Environment.GetEnvironmentVariable "CHESS_OVERLAY_FEN")
+                environmentFen
 
-        use controller = new OverlayController(detector, reader, overlay, timingEnabled = options.TimingEnabled)
+        let warning =
+            match calibrationWarning, warning with
+            | Some calibration, Some readerWarning -> Some(calibration + " - " + readerWarning)
+            | Some calibration, None -> Some calibration
+            | None, Some readerWarning -> Some readerWarning
+            | None, None -> None
+
+        use controller = new OverlayController(boardGeometry, reader, overlay, timingEnabled = options.TimingEnabled)
         overlay.Load.Add(fun _ ->
             overlay.ShowStatus(statusWithWarning (startupStatus options) warning)
             controller.Start())
@@ -154,6 +202,6 @@ module Program =
 
         let options = parseStartupOptions args
 
-        tryCreateDetector options selectBoardGeometry
+        tryGetBoardGeometry options selectBoardGeometry
         |> Option.map (runOverlay options)
         |> Option.defaultValue 1

@@ -15,12 +15,14 @@ module ProgramTests =
                     "10,20,300"
                     "--fen"
                     "8/8/8/8/8/8/8/8 w - - 0 1"
+                    "--calibrate-templates"
                 |]
 
         Assert.True(options.IsDemo)
         Assert.True(options.TimingEnabled)
         Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, options.BoardGeometry)
         Assert.Equal(Some "8/8/8/8/8/8/8/8 w - - 0 1", options.Fen)
+        Assert.True(options.CalibrateTemplates)
         Assert.True(Program.tryParseBoardGeometry("10,20") |> Option.isNone)
         Assert.True(Program.tryParseBoardGeometry("10,20,0") |> Option.isNone)
         Assert.True(Program.tryParseBoardGeometry("10,top,300") |> Option.isNone)
@@ -34,25 +36,25 @@ module ProgramTests =
         Assert.Equal("Mode: manual board geometry - warning", Program.statusWithWarning "Mode: manual board geometry" (Some "warning"))
 
     [<Fact>]
-    let ``Detector creation uses supplied board before manual selection`` () =
+    let ``Board geometry creation uses supplied board before manual selection`` () =
         let options = Program.parseStartupOptions [| "--board"; "10,20,300" |]
         let mutable selectionRequested = false
 
-        let detector =
-            Program.tryCreateDetector options (fun () ->
+        let geometry =
+            Program.tryGetBoardGeometry options (fun () ->
                 selectionRequested <- true
                 None)
 
-        Assert.True(detector.IsSome)
+        Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, geometry)
         Assert.False(selectionRequested)
 
     [<Fact>]
-    let ``Detector creation returns none when manual selection is cancelled`` () =
+    let ``Board geometry creation returns none when manual selection is cancelled`` () =
         let options = Program.parseStartupOptions [||]
 
-        let detector = Program.tryCreateDetector options (fun () -> None)
+        let geometry = Program.tryGetBoardGeometry options (fun () -> None)
 
-        Assert.True(detector.IsNone)
+        Assert.True(geometry.IsNone)
 
     [<Fact>]
     let ``Reader creation prefers command line FEN over environment FEN`` () =

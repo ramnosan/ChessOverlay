@@ -44,28 +44,90 @@ module PieceTemplates =
                 |> Array.toList
 
         match parts with
-        | [ colorName; kindName ] ->
+        | colorName :: kindName :: _ ->
             Option.map2
                 (fun color kind -> { Color = color; Kind = kind })
                 (Map.tryFind colorName colors)
                 (Map.tryFind kindName kinds)
         | _ -> None
 
-    let loadFromDirectory (path: string) : Map<Piece, Bitmap> =
+    let loadAllFromDirectory (path: string) : (Piece * Bitmap) array =
         if not (Directory.Exists path) then
-            Map.empty
+            Array.empty
         else
             [| yield! Directory.GetFiles(path, "*.png")
                yield! Directory.GetFiles(path, "*.bmp") |]
             |> Array.choose (fun filePath ->
                 tryParsePiece filePath
                 |> Option.map (fun piece -> piece, new Bitmap(filePath)))
-            |> Map.ofArray
+
+    let loadFromDirectory (path: string) : Map<Piece, Bitmap> =
+        loadAllFromDirectory path |> Map.ofArray
+
+module PieceBitmap =
+    let extractSquareBitmap (bitmap: Bitmap) (geometry: BoardGeometry) (square: Square) : Bitmap option =
+        let rect = geometry.GetSquareRectangle square
+        let x = int rect.X
+        let y = int rect.Y
+        let w = int rect.Width
+        let h = int rect.Height
+        let clampedX = max 0 x
+        let clampedY = max 0 y
+        let clampedW = min w (bitmap.Width - clampedX)
+        let clampedH = min h (bitmap.Height - clampedY)
+
+        if clampedW <= 0 || clampedH <= 0 then
+            None
+        else
+            let crop = new Bitmap(clampedW, clampedH)
+
+            use g = Graphics.FromImage(crop)
+            g.DrawImage(bitmap, Rectangle(0, 0, clampedW, clampedH), Rectangle(clampedX, clampedY, clampedW, clampedH), GraphicsUnit.Pixel)
+            Some crop
+
+module PieceTemplateCalibration =
+    let private startingPosition = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+
+    let private colorName piece =
+        match piece.Color with
+        | Top -> "black"
+        | Bottom -> "white"
+
+    let private kindName piece =
+        match piece.Kind with
+        | King -> "king"
+        | Queen -> "queen"
+        | Rook -> "rook"
+        | Bishop -> "bishop"
+        | Knight -> "knight"
+        | Pawn -> "pawn"
+
+    let private templateFileName piece square =
+        sprintf "%s_%s_%s.png" (colorName piece) (kindName piece) (Squares.name square)
+
+    let saveStartingPositionTemplates (bitmap: Bitmap) (geometry: BoardGeometry) (path: string) =
+        match Fen.parseBoard startingPosition with
+        | Error _ -> 0
+        | Ok board ->
+            Directory.CreateDirectory path |> ignore
+
+            board
+            |> Map.toSeq
+            |> Seq.fold
+                (fun savedCount (square, piece) ->
+                    match PieceBitmap.extractSquareBitmap bitmap geometry square with
+                    | None -> savedCount
+                    | Some template ->
+                        use template = template
+                        let filePath = Path.Combine(path, templateFileName piece square)
+                        template.Save(filePath, ImageFormat.Png)
+                        savedCount + 1)
+                0
 
 module SimilarityComparison =
     let private sampleSize = 32
 
-    let private toGrayscaleArray (bitmap: Bitmap) : float[] =
+    let toGrayscaleArray (bitmap: Bitmap) : float[] =
         use scaled = new Bitmap(sampleSize, sampleSize)
         use g = Graphics.FromImage(scaled)
         g.InterpolationMode <- InterpolationMode.Bilinear
@@ -90,6 +152,28 @@ module SimilarityComparison =
                 (r + gr + b) / 3.0)
         finally
             scaled.UnlockBits(data)
+
+    let piecePresenceScore (sample: float[]) =
+        let centerStart = sampleSize / 4
+        let centerEnd = sampleSize - centerStart
+
+        let mutable total = 0.0
+        let mutable totalSquared = 0.0
+        let mutable count = 0
+
+        for y in centerStart .. centerEnd - 1 do
+            for x in centerStart .. centerEnd - 1 do
+                let value = sample[y * sampleSize + x]
+                total <- total + value
+                totalSquared <- totalSquared + value * value
+                count <- count + 1
+
+        if count = 0 then
+            0.0
+        else
+            let mean = total / float count
+            let variance = max 0.0 (totalSquared / float count - mean * mean)
+            sqrt variance
 
     let private ncc (template: float[]) (sample: float[]) =
         let n = template.Length
@@ -117,62 +201,63 @@ module SimilarityComparison =
         if tsq < 1.0 || ssq < 1.0 then 0.0
         else num / sqrt (tsq * ssq)
 
-    let prepareTemplates (bitmaps: Map<Piece, Bitmap>) : Map<Piece, float[]> =
-        bitmaps |> Map.map (fun _ bmp -> toGrayscaleArray bmp)
+    let prepareTemplates (bitmaps: seq<Piece * Bitmap>) : (Piece * float[]) array =
+        bitmaps
+        |> Seq.map (fun (piece, bmp) -> piece, toGrayscaleArray bmp)
+        |> Seq.toArray
 
-    let findBestMatch (templates: Map<Piece, float[]>) (squareBitmap: Bitmap) (threshold: float) : Piece option =
+    let findBestMatch (templates: (Piece * float[]) array) (squareBitmap: Bitmap) (threshold: float) : Piece option =
         let squareGray = toGrayscaleArray squareBitmap
 
         templates
-        |> Map.toSeq
-        |> Seq.map (fun (piece, templateGray) -> piece, ncc templateGray squareGray)
-        |> Seq.filter (fun (_, score) -> score >= threshold)
-        |> Seq.sortByDescending snd
-        |> Seq.tryHead
+        |> Array.fold
+            (fun best (piece, templateGray) ->
+                let score = ncc templateGray squareGray
+
+                match best with
+                | Some(_, bestScore) when bestScore >= score -> best
+                | _ when score >= threshold -> Some(piece, score)
+                | _ -> best)
+            None
         |> Option.map fst
 
-type TemplateBoardReader(templates: Map<Piece, Bitmap>, threshold: float) =
+type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
     let preparedTemplates = SimilarityComparison.prepareTemplates templates
+    let piecePresenceThreshold =
+        preparedTemplates
+        |> Array.map (snd >> SimilarityComparison.piecePresenceScore)
+        |> Array.filter (fun score -> score > 0.0)
+        |> fun scores ->
+            if Array.isEmpty scores then
+                Double.PositiveInfinity
+            else
+                Array.sortInPlace scores
+                Array.min scores * 0.35
 
-    let extractSquareBitmap (bitmap: Bitmap) (geometry: BoardGeometry) (square: Square) : Bitmap option =
-        let rect = geometry.GetSquareRectangle square
-        let x = int rect.X
-        let y = int rect.Y
-        let w = int rect.Width
-        let h = int rect.Height
-        let clampedX = max 0 x
-        let clampedY = max 0 y
-        let clampedW = min w (bitmap.Width - clampedX)
-        let clampedH = min h (bitmap.Height - clampedY)
-
-        if clampedW <= 0 || clampedH <= 0 then
-            None
-        else
-            let crop = new Bitmap(clampedW, clampedH)
-
-            use g = Graphics.FromImage(crop)
-            g.DrawImage(bitmap, Rectangle(0, 0, clampedW, clampedH), Rectangle(clampedX, clampedY, clampedW, clampedH), GraphicsUnit.Pixel)
-            Some crop
+    new(templates: Map<Piece, Bitmap>, threshold: float) =
+        TemplateBoardReader(templates |> Map.toSeq, threshold)
 
     interface IBoardReader with
         member _.Read(bitmap: Bitmap, geometry: BoardGeometry) =
-            if preparedTemplates.IsEmpty then
+            if Array.isEmpty preparedTemplates then
                 None
             else
                 let mutable board = Map.empty
                 let mutable matchCount = 0
 
                 for square in Squares.all do
-                    match extractSquareBitmap bitmap geometry square with
+                    match PieceBitmap.extractSquareBitmap bitmap geometry square with
                     | None -> ()
                     | Some squareBmp ->
                         use squareBmp = squareBmp
+                        let squareGray = SimilarityComparison.toGrayscaleArray squareBmp
 
-                        match SimilarityComparison.findBestMatch preparedTemplates squareBmp threshold with
-                        | Some piece ->
-                            board <- Map.add square piece board
-                            matchCount <- matchCount + 1
-                        | None -> ()
+                        if SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold then
+                            match SimilarityComparison.findBestMatch preparedTemplates squareBmp threshold with
+                            | Some piece ->
+                                board <- Map.add square piece board
+                                matchCount <- matchCount + 1
+                            | None -> ()
 
                 let confidence =
                     if matchCount = 0 then 0.0

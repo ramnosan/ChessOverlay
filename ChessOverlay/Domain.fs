@@ -55,10 +55,6 @@ type BoardReading =
         Confidence: float
     }
 
-type DetectionResult =
-    | BoardDetected of BoardGeometry
-    | BoardNotFound
-
 type OverlayFrame =
     {
         Geometry: BoardGeometry

@@ -14,7 +14,7 @@ type OverlayWindow() as this =
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
     let mutable frame: OverlayFrame option = None
-    let mutable statusText = "Searching for chessboard..."
+    let mutable statusText = "Select a chessboard to start..."
     let virtualBounds = SystemInformation.VirtualScreen
 
     do
@@ -43,19 +43,14 @@ type OverlayWindow() as this =
 
     member _.ShowFrame(nextFrame: OverlayFrame) =
         frame <- Some nextFrame
-        statusText <- sprintf "Board detected - %i attacked squares" nextFrame.HighlightedSquares.Count
-        this.Invalidate()
-
-    member _.ShowSearching() =
-        frame <- None
-        statusText <- "Searching for chessboard..."
+        statusText <- sprintf "Board selected - %i attacked squares" nextFrame.HighlightedSquares.Count
         this.Invalidate()
 
     member _.ShowStatus(message: string) =
         statusText <- message
         this.Invalidate()
 
-    member _.ShowUncertainBoard(geometry: BoardGeometry) =
+    member _.ShowUncertainBoard(geometry: BoardGeometry, ?message: string) =
         frame <-
             Some
                 {
@@ -64,7 +59,7 @@ type OverlayWindow() as this =
                     DetectedPieces = None
                 }
 
-        statusText <- "Board found - reading pieces..."
+        statusText <- defaultArg message "Board selected - reading pieces..."
         this.Invalidate()
 
     override _.OnPaint(args) =
