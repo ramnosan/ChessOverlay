@@ -1,9 +1,11 @@
 namespace ChessOverlay
 
 open System
+open System.Diagnostics.CodeAnalysis
 open System.Drawing
 open System.Windows.Forms
 
+[<ExcludeFromCodeCoverage>]
 type OverlayWindow() as this =
     inherit Form()
 
@@ -47,6 +49,10 @@ type OverlayWindow() as this =
     member _.ShowSearching() =
         frame <- None
         statusText <- "Searching for chessboard..."
+        this.Invalidate()
+
+    member _.ShowStatus(message: string) =
+        statusText <- message
         this.Invalidate()
 
     member _.ShowUncertainBoard(geometry: BoardGeometry) =
@@ -118,7 +124,7 @@ type OverlayWindow() as this =
         graphics.FillRectangle(stripeBrush, RectangleF(x, y, stripeWidth, height))
         graphics.DrawString(statusText, font, textBrush, x + stripeWidth + padding, y + 8.0f)
 
-and private NativeMethods =
+and [<ExcludeFromCodeCoverage>] private NativeMethods =
     [<Literal>]
     static let GWL_EXSTYLE_VALUE = -20
 
