@@ -11,29 +11,18 @@ module ProgramTests =
                 [|
                     "--demo"
                     "--timing"
-                    "--gpu"
                     "--scan"
                     "--board"
                     "10,20,300"
                     "--fen"
                     "8/8/8/8/8/8/8/8 w - - 0 1"
-                    "--piece-reader"
-                    "yolo"
-                    "--piece-model"
-                    "model.onnx"
-                    "--piece-labels"
-                    "labels.json"
                 |]
 
         Assert.True(options.IsDemo)
         Assert.True(options.TimingEnabled)
-        Assert.True(options.PreferGpu)
         Assert.True(options.ScanAutomatically)
         Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, options.BoardGeometry)
         Assert.Equal(Some "8/8/8/8/8/8/8/8 w - - 0 1", options.Fen)
-        Assert.Equal(Some "yolo", options.PieceReader)
-        Assert.Equal(Some "model.onnx", options.PieceModel)
-        Assert.Equal(Some "labels.json", options.PieceLabels)
 
     [<Fact>]
     let ``Startup status describes selected mode and timing`` () =
@@ -70,66 +59,30 @@ module ProgramTests =
             Program.parseStartupOptions [| "--fen"; "8/8/8/8/8/8/8/8 w - - 0 1" |]
 
         let reader, warning =
-            Program.createReader options "invalid" ignore
+            Program.createReader options "invalid"
 
         Assert.IsType<FenBoardReader>(reader) |> ignore
         Assert.True(warning.IsNone)
-
-    [<Fact>]
-    let ``Reader creation uses requested yolo before FEN fallbacks`` () =
-        let options =
-            Program.parseStartupOptions
-                [|
-                    "--piece-reader"
-                    "yolo"
-                    "--fen"
-                    "8/8/8/8/8/8/8/8 w - - 0 1"
-                |]
-
-        let reader, warning =
-            Program.createReader options "8/8/8/8/8/8/8/8 w - - 0 1" ignore
-
-        Assert.IsType<UncertainBoardReader>(reader) |> ignore
-        Assert.Equal(Some "YOLO model or labels missing", warning)
 
     [<Fact>]
     let ``Reader creation uses environment FEN when command line FEN is absent`` () =
         let options = Program.parseStartupOptions [||]
 
         let reader, warning =
-            Program.createReader options "8/8/8/8/8/8/8/8 w - - 0 1" ignore
+            Program.createReader options "8/8/8/8/8/8/8/8 w - - 0 1"
 
         Assert.IsType<FenBoardReader>(reader) |> ignore
         Assert.True(warning.IsNone)
 
     [<Fact>]
-    let ``Reader creation uses demo FEN and reports missing default yolo files`` () =
+    let ``Reader creation uses demo FEN and reports missing piece reader`` () =
         let demoReader, demoWarning =
-            Program.createReader (Program.parseStartupOptions [| "--demo" |]) null ignore
+            Program.createReader (Program.parseStartupOptions [| "--demo" |]) null
 
         let defaultReader, defaultWarning =
-            Program.createReader (Program.parseStartupOptions [||]) null ignore
+            Program.createReader (Program.parseStartupOptions [||]) null
 
         Assert.IsType<FenBoardReader>(demoReader) |> ignore
         Assert.True(demoWarning.IsNone)
         Assert.IsType<UncertainBoardReader>(defaultReader) |> ignore
-        Assert.Equal(Some "YOLO model or labels missing", defaultWarning)
-
-    [<Fact>]
-    let ``Reader creation reports missing yolo files`` () =
-        let options =
-            Program.parseStartupOptions
-                [|
-                    "--piece-reader"
-                    "yolo"
-                    "--piece-model"
-                    "missing.onnx"
-                    "--piece-labels"
-                    "missing.json"
-                |]
-
-        let reader, warning =
-            Program.createReader options null ignore
-
-        Assert.IsType<UncertainBoardReader>(reader) |> ignore
-        Assert.Equal(Some "YOLO model or labels missing", warning)
+        Assert.Equal(Some "No piece reader configured", defaultWarning)

@@ -83,8 +83,7 @@ module ArchitectureView =
         | _, "OverlayController"
         | _, "OverlayWindow"
         | _, "BoardSelectionWindow" -> "Overlay UI", 1
-        | _, "BoardDetection"
-        | _, "YoloPieceDetection" -> "Screen And Piece Detection", 2
+        | _, "BoardDetection" -> "Screen And Piece Detection", 2
         | _, "AttackCalculator" -> "Chess Rules", 3
         | _, "Domain" -> "Domain Model", 4
         | _ -> "Application Core", 2

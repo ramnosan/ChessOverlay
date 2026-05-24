@@ -12,7 +12,6 @@
     <Compile Include="AttackCalculatorTests.fs" />
     <Compile Include="BoardDetectionTests.fs" />
     <Compile Include="BoardDetectorCacheTests.fs" />
-    <Compile Include="YoloPieceDetectionTests.fs" />
     <Compile Include="CrapMetricTests.fs" />
     <Compile Include="DryDuplicationTests.fs" />
     <Compile Include="ArchitectureViewTests.fs" />
