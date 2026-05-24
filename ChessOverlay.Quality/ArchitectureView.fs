@@ -83,7 +83,8 @@ module ArchitectureView =
         | _, "OverlayController"
         | _, "OverlayWindow"
         | _, "BoardSelectionWindow" -> "Overlay UI", 1
-        | _, "BoardDetection" -> "Screen And Piece Detection", 2
+        | _, "BoardDetection"
+        | _, "TemplatePieceDetection" -> "Screen And Piece Detection", 2
         | _, "AttackCalculator" -> "Chess Rules", 3
         | _, "Domain" -> "Domain Model", 4
         | _ -> "Application Core", 2
@@ -312,39 +313,147 @@ module ArchitectureView =
 
         builder.ToString()
 
-    let private renderModuleCard (model: ArchitectureModel) (moduleInfo: ArchitectureModule) =
-        let outgoing =
-            model.Dependencies
-            |> List.filter (fun edge -> edge.From = moduleInfo.Id)
+    let private boxWidth = 150
+    let private boxHeight = 56
+    let private hGap = 30
+    let private vGap = 70
+    let private marginX = 30
+    let private marginY = 40
 
-        let incoming =
-            model.Dependencies
-            |> List.filter (fun edge -> edge.To = moduleInfo.Id)
+    type private BoxLayout =
+        {
+            Module: ArchitectureModule
+            X: int
+            Y: int
+        }
 
-        let cycleClass =
-            if outgoing |> List.exists _.IsCycle || incoming |> List.exists _.IsCycle then
-                " cycle"
+    let private layoutBoxes (model: ArchitectureModel) =
+        let layers =
+            model.Modules
+            |> List.groupBy (fun moduleInfo -> moduleInfo.LayerRank, moduleInfo.Layer)
+            |> List.sortBy fst
+            |> List.map (fun (key, modules) -> key, modules |> List.sortBy _.Name)
+
+        let layerWidths =
+            layers
+            |> List.map (fun (_, modules) ->
+                let count = modules.Length
+                count * boxWidth + max 0 (count - 1) * hGap)
+
+        let canvasWidth =
+            if List.isEmpty layerWidths then
+                boxWidth
             else
-                ""
+                List.max layerWidths
 
-        let symbolSummary =
-            moduleInfo.Symbols
-            |> List.truncate 5
-            |> String.concat ", "
-            |> html
+        let lastLayerHasSiblings =
+            match layers |> List.tryLast with
+            | Some (_, modules) -> modules.Length > 1
+            | None -> false
 
-        $"""<article class="module{cycleClass}" data-module="{html moduleInfo.Id}">
-  <button type="button" class="module-title">{html moduleInfo.Name}</button>
-  <div class="module-file">{html moduleInfo.File}</div>
-  <div class="module-meta"><span>{moduleInfo.Lines} lines</span><span>{incoming.Length} in</span><span>{outgoing.Length} out</span></div>
-  <div class="symbols">{symbolSummary}</div>
-</article>"""
+        let bottomArcPadding = if lastLayerHasSiblings then vGap else 0
+
+        let canvasHeight =
+            if List.isEmpty layers then
+                boxHeight
+            else
+                layers.Length * boxHeight + max 0 (layers.Length - 1) * vGap + bottomArcPadding
+
+        let boxes =
+            layers
+            |> List.mapi (fun layerIndex (_, modules) ->
+                let totalWidth =
+                    modules.Length * boxWidth + max 0 (modules.Length - 1) * hGap
+
+                let xStart = marginX + (canvasWidth - totalWidth) / 2
+                let y = marginY + layerIndex * (boxHeight + vGap)
+
+                modules
+                |> List.mapi (fun moduleIndex moduleInfo ->
+                    {
+                        Module = moduleInfo
+                        X = xStart + moduleIndex * (boxWidth + hGap)
+                        Y = y
+                    }))
+            |> List.concat
+
+        let totalWidth = canvasWidth + marginX * 2
+        let totalHeight = canvasHeight + marginY * 2
+        boxes, totalWidth, totalHeight
+
+    let private renderSvgDiagram (model: ArchitectureModel) =
+        let boxes, width, height = layoutBoxes model
+        let boxById = boxes |> List.map (fun box -> box.Module.Id, box) |> Map.ofList
+
+        let cycleClassOf (moduleInfo: ArchitectureModule) =
+            let touchesCycle =
+                model.Dependencies
+                |> List.exists (fun edge ->
+                    edge.IsCycle && (edge.From = moduleInfo.Id || edge.To = moduleInfo.Id))
+
+            if touchesCycle then " cycle" else ""
+
+        let edgePaths =
+            model.Dependencies
+            |> List.choose (fun edge ->
+                match Map.tryFind edge.From boxById, Map.tryFind edge.To boxById with
+                | Some source, Some target ->
+                    let sourceCenterX = source.X + boxWidth / 2
+                    let targetCenterX = target.X + boxWidth / 2
+
+                    let pathData =
+                        if target.Y > source.Y then
+                            sprintf "M %d %d L %d %d" sourceCenterX (source.Y + boxHeight) targetCenterX target.Y
+                        elif target.Y < source.Y then
+                            sprintf "M %d %d L %d %d" sourceCenterX source.Y targetCenterX (target.Y + boxHeight)
+                        else
+                            let sx = sourceCenterX
+                            let sy = source.Y + boxHeight
+                            let tx = targetCenterX
+                            let ty = target.Y + boxHeight
+                            let span = abs (tx - sx)
+                            let arcDepth = max 24 (min (vGap - 10) (span / 3))
+                            let cx = (sx + tx) / 2
+                            let cy = sy + arcDepth
+                            sprintf "M %d %d Q %d %d %d %d" sx sy cx cy tx ty
+
+                    let cls = if edge.IsCycle then "edge cycle" else "edge"
+                    let dataFrom = html edge.From
+                    let dataTo = html edge.To
+                    let path = sprintf "<path class=\"%s\" data-from=\"%s\" data-to=\"%s\" d=\"%s\" marker-end=\"url(#arrow)\" />" cls dataFrom dataTo pathData
+                    Some path
+                | _ -> None)
+            |> String.concat Environment.NewLine
+
+        let boxNodes =
+            boxes
+            |> List.map (fun box ->
+                let cls = "node" + cycleClassOf box.Module
+                let dataId = html box.Module.Id
+                let label = html box.Module.Name
+                let titleX = box.X + boxWidth / 2
+                let titleY = box.Y + boxHeight / 2 + 5
+                let rect = sprintf "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" rx=\"6\" ry=\"6\" />" box.X box.Y boxWidth boxHeight
+                let text = sprintf "<text x=\"%d\" y=\"%d\" text-anchor=\"middle\">%s</text>" titleX titleY label
+                sprintf "<g class=\"%s\" data-module=\"%s\">%s%s</g>" cls dataId rect text)
+            |> String.concat Environment.NewLine
+
+        let defs = "<defs><marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto-start-reverse\"><path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"#65736b\" /></marker></defs>"
+        sprintf "<svg id=\"diagram-svg\" viewBox=\"0 0 %d %d\" preserveAspectRatio=\"xMidYMin meet\" xmlns=\"http://www.w3.org/2000/svg\">%s<g class=\"edges\">%s</g><g class=\"nodes\">%s</g></svg>" width height defs edgePaths boxNodes
 
     let renderHtml (model: ArchitectureModel) =
         let layers =
             model.Modules
             |> List.groupBy (fun moduleInfo -> moduleInfo.LayerRank, moduleInfo.Layer)
             |> List.sortBy fst
+
+        let svgDiagram = renderSvgDiagram model
+
+        let layerLegend =
+            layers
+            |> List.map (fun ((_, layer), modules) ->
+                $"""<li><strong>{html layer}</strong> <span>{modules.Length}</span></li>""")
+            |> String.concat Environment.NewLine
 
         let modulesJson =
             model.Modules
@@ -374,25 +483,10 @@ module ArchitectureView =
             else
                 model.Cycles
                 |> List.map (fun cycle ->
-                    let path = html (String.Join(" -> ", cycle.Path))
+                    let path = html (String.Join(" → ", cycle.Path))
                     $"<li>{path}</li>")
                 |> String.concat Environment.NewLine
                 |> sprintf "<ul>%s</ul>"
-
-        let layerHtml =
-            layers
-            |> List.map (fun ((_, layer), modules) ->
-                let cards =
-                    modules
-                    |> List.sortBy _.Name
-                    |> List.map (renderModuleCard model)
-                    |> String.concat Environment.NewLine
-
-                $"""<section class="layer">
-  <header><h2>{html layer}</h2><span>{modules.Length} modules</span></header>
-  <div class="module-grid">{cards}</div>
-</section>""")
-            |> String.concat Environment.NewLine
 
         $"""<!doctype html>
 <html lang="en">
@@ -407,20 +501,28 @@ body {{ margin: 0; font-family: Segoe UI, system-ui, sans-serif; color: var(--in
 h1 {{ font-size: 20px; margin: 0 18px 0 0; }}
 input {{ min-width: 260px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }}
 main {{ display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; padding: 18px; }}
-.layer {{ border-top: 3px solid var(--accent); padding-top: 10px; margin-bottom: 18px; }}
-.layer header {{ display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }}
-h2 {{ font-size: 16px; margin: 0; }}
-.layer header span, .module-file, .symbols, .module-meta {{ color: var(--muted); font-size: 12px; }}
-.module-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }}
-.module {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 112px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }}
-.module:hover, .module.selected {{ border-color: var(--accent); outline: 2px solid rgba(17,106,92,.12); }}
-.module.cycle {{ border-color: var(--warn); }}
-.module-title {{ appearance: none; border: 0; background: transparent; padding: 0; color: var(--ink); font-weight: 700; font-size: 15px; cursor: pointer; }}
-.module-meta {{ display: flex; gap: 10px; margin: 8px 0; }}
+h2 {{ font-size: 16px; margin: 0 0 8px; }}
+#diagram {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; }}
+#diagram-svg {{ width: 100%%; height: auto; display: block; }}
+.node rect {{ fill: #eaf0ee; stroke: var(--line); stroke-width: 1.5; transition: fill .12s, stroke .12s; }}
+.node text {{ font-family: Consolas, "Courier New", monospace; font-size: 12px; fill: var(--ink); pointer-events: none; }}
+.node {{ cursor: pointer; }}
+.node:hover rect, .node.selected rect {{ fill: #d6e6e0; stroke: var(--accent); stroke-width: 2; }}
+.node.cycle rect {{ stroke: var(--warn); }}
+.node.dim {{ opacity: 0.25; }}
+.edges path {{ fill: none; stroke: #65736b; stroke-width: 1.5; }}
+.edges path.cycle {{ stroke: var(--warn); stroke-dasharray: 4 3; }}
+.edges path.highlight {{ stroke: var(--accent); stroke-width: 2.5; }}
+.legend {{ list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }}
+.legend li {{ background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }}
+.legend span {{ color: var(--ink); margin-left: 4px; }}
 aside {{ position: sticky; top: 68px; align-self: start; border-left: 1px solid var(--line); padding-left: 18px; max-height: calc(100vh - 90px); overflow: auto; }}
 .edge {{ padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }}
 .edge.cycle {{ color: var(--warn); font-weight: 700; }}
 .empty {{ color: var(--muted); }}
+.dep-in {{ color: #0066aa; font-weight: 600; }}
+.dep-out {{ color: #885500; font-weight: 600; }}
+.arrow {{ font-size: 15px; margin-right: 4px; }}
 @media (max-width: 900px) {{ main {{ grid-template-columns: 1fr; }} aside {{ position: static; border-left: 0; padding-left: 0; }} .toolbar {{ flex-wrap: wrap; }} }}
 </style>
 </head>
@@ -433,7 +535,10 @@ aside {{ position: sticky; top: 68px; align-self: start; border-left: 1px solid 
   <span>{model.Cycles.Length} cycles</span>
 </div>
 <main>
-  <div id="diagram">{layerHtml}</div>
+  <div id="diagram">
+    <ul class="legend">{layerLegend}</ul>
+    {svgDiagram}
+  </div>
   <aside>
     <h2 id="details-title">Select a module</h2>
     <div id="details" class="empty">Click a module to inspect incoming and outgoing dependencies.</div>
@@ -447,14 +552,21 @@ const edges = [{edgesJson}];
 const byId = Object.fromEntries(modules.map(module => [module.id, module]));
 const details = document.querySelector("#details");
 const title = document.querySelector("#details-title");
+const nodes = () => document.querySelectorAll("#diagram-svg .node");
+const edgePaths = () => document.querySelectorAll("#diagram-svg .edges path");
 function describeEdge(edge, direction) {{
   const other = direction === "out" ? byId[edge.to] : byId[edge.from];
-  const arrow = direction === "out" ? "uses" : "used by";
+  const arrow = direction === "out" ? "→" : "←";
+  const arrowClass = direction === "out" ? "dep-out" : "dep-in";
   const symbols = edge.symbols.length ? " via " + edge.symbols.join(", ") : "";
-  return `<div class="edge ${{edge.cycle ? "cycle" : ""}}"><strong>${{arrow}}</strong> ${{other.name}}<br><span>${{other.file}}${{symbols}}</span></div>`;
+  return `<div class="edge ${{edge.cycle ? "cycle" : ""}}"><span class="arrow ${{arrowClass}}">${{arrow}}</span><strong>${{other.name}}</strong><br><span>${{other.file}}${{symbols}}</span></div>`;
 }}
 function selectModule(id) {{
-  document.querySelectorAll(".module").forEach(card => card.classList.toggle("selected", card.dataset.module === id));
+  nodes().forEach(node => node.classList.toggle("selected", node.dataset.module === id));
+  edgePaths().forEach(path => {{
+    const related = path.dataset.from === id || path.dataset.to === id;
+    path.classList.toggle("highlight", related);
+  }});
   const module = byId[id];
   const outgoing = edges.filter(edge => edge.from === id);
   const incoming = edges.filter(edge => edge.to === id);
@@ -464,16 +576,15 @@ function selectModule(id) {{
     `<h3>Outgoing</h3>${{outgoing.length ? outgoing.map(edge => describeEdge(edge, "out")).join("") : "<p class='empty'>No outgoing dependencies.</p>"}}` +
     `<h3>Incoming</h3>${{incoming.length ? incoming.map(edge => describeEdge(edge, "in")).join("") : "<p class='empty'>No incoming dependencies.</p>"}}`;
 }}
-document.querySelectorAll(".module-title").forEach(button => {{
-  button.addEventListener("click", event => selectModule(event.target.closest(".module").dataset.module));
-}});
+nodes().forEach(node => node.addEventListener("click", () => selectModule(node.dataset.module)));
 document.querySelector("#filter").addEventListener("input", event => {{
   const value = event.target.value.toLowerCase();
-  document.querySelectorAll(".module").forEach(card => {{
-    const module = byId[card.dataset.module];
+  const matches = new Set();
+  modules.forEach(module => {{
     const haystack = [module.name, module.file, module.layer, ...module.symbols].join(" ").toLowerCase();
-    card.style.display = haystack.includes(value) ? "" : "none";
+    if (!value || haystack.includes(value)) matches.add(module.id);
   }});
+  nodes().forEach(node => node.classList.toggle("dim", !matches.has(node.dataset.module)));
 }});
 </script>
 </body>

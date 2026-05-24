@@ -11,7 +11,6 @@ module ProgramTests =
                 [|
                     "--demo"
                     "--timing"
-                    "--scan"
                     "--board"
                     "10,20,300"
                     "--fen"
@@ -20,7 +19,6 @@ module ProgramTests =
 
         Assert.True(options.IsDemo)
         Assert.True(options.TimingEnabled)
-        Assert.True(options.ScanAutomatically)
         Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, options.BoardGeometry)
         Assert.Equal(Some "8/8/8/8/8/8/8/8 w - - 0 1", options.Fen)
 
@@ -85,4 +83,4 @@ module ProgramTests =
         Assert.IsType<FenBoardReader>(demoReader) |> ignore
         Assert.True(demoWarning.IsNone)
         Assert.IsType<UncertainBoardReader>(defaultReader) |> ignore
-        Assert.Equal(Some "No piece reader configured", defaultWarning)
+        Assert.Equal(Some "No templates found in 'templates'", defaultWarning)

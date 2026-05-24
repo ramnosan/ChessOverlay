@@ -61,6 +61,7 @@ type OverlayWindow() as this =
                 {
                     Geometry = geometry
                     HighlightedSquares = Set.empty
+                    DetectedPieces = None
                 }
 
         statusText <- "Board found - reading pieces..."
@@ -95,7 +96,50 @@ type OverlayWindow() as this =
                 boardRect.Width,
                 boardRect.Height)
 
+            match current.DetectedPieces with
+            | None -> ()
+            | Some pieces -> this.PaintPieceLabels(args.Graphics, current.Geometry, pieces)
+
             this.PaintStatus args.Graphics
+
+    member private _.PieceNotation(piece: Piece) =
+        let letter =
+            match piece.Kind with
+            | King -> "K"
+            | Queen -> "Q"
+            | Rook -> "R"
+            | Bishop -> "B"
+            | Knight -> "N"
+            | Pawn -> "P"
+
+        if piece.Color = Top then letter.ToLowerInvariant() else letter
+
+    member private this.PaintPieceLabels(graphics: Graphics, geometry: BoardGeometry, pieces: BoardState) =
+        let fontSize = single geometry.SquareSize * 0.38f
+        use font = new Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel)
+
+        for KeyValue(square, piece) in pieces do
+            let rect = this.ToClientRectangle(geometry.GetSquareRectangle square)
+            let notation = this.PieceNotation piece
+            let textSize = graphics.MeasureString(notation, font)
+            let tx = rect.X + (rect.Width - textSize.Width) / 2.0f
+            let ty = rect.Y + (rect.Height - textSize.Height) / 2.0f
+
+            let textColor, shadowColor =
+                if piece.Color = Bottom then
+                    Color.FromArgb(240, 255, 255, 255), Color.FromArgb(200, 20, 20, 20)
+                else
+                    Color.FromArgb(240, 24, 24, 24), Color.FromArgb(200, 240, 240, 240)
+
+            use shadowBrush = new SolidBrush(shadowColor)
+
+            for dx in [ -1; 0; 1 ] do
+                for dy in [ -1; 0; 1 ] do
+                    if dx <> 0 || dy <> 0 then
+                        graphics.DrawString(notation, font, shadowBrush, tx + single dx, ty + single dy)
+
+            use textBrush = new SolidBrush(textColor)
+            graphics.DrawString(notation, font, textBrush, tx, ty)
 
     member private _.ToClientRectangle(rectangle: RectangleF) : RectangleF =
         RectangleF(
