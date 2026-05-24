@@ -63,6 +63,7 @@ type OverlayFrame =
     {
         Geometry: BoardGeometry
         HighlightedSquares: Set<Square>
+        DetectedPieces: BoardState option
     }
 
 module Squares =

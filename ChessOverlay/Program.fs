@@ -17,6 +17,7 @@ module Program =
             PieceReader: string option
             PieceModel: string option
             PieceLabels: string option
+            PieceTemplates: string option
         }
 
     let tryArgumentValue name (args: string array) =
@@ -49,6 +50,7 @@ module Program =
             PieceReader = tryArgumentValue "--piece-reader" args
             PieceModel = tryArgumentValue "--piece-model" args
             PieceLabels = tryArgumentValue "--piece-labels" args
+            PieceTemplates = tryArgumentValue "--piece-templates" args
         }
 
     [<ExcludeFromCodeCoverage>]
@@ -98,6 +100,12 @@ module Program =
         options.PieceReader = Some "yolo"
         || (options.PieceModel.IsSome && options.PieceLabels.IsSome)
 
+    let private shouldUseTemplates options =
+        options.PieceReader = Some "template"
+        || options.PieceTemplates.IsSome
+
+    let private defaultSimilarityThreshold = 0.75
+
     let createReader options environmentFen registerDisposable =
         match options.Fen, environmentFen with
         | _ when shouldUseYolo options ->
@@ -110,6 +118,14 @@ module Program =
                 YoloBoardReader(yoloDetector :> IYoloObjectDetector, labels) :> IBoardReader, None
             | _ ->
                 UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
+        | _ when shouldUseTemplates options ->
+            let templatesPath = options.PieceTemplates |> Option.defaultValue "templates"
+            let templates = PieceTemplates.loadFromDirectory templatesPath
+
+            if templates.IsEmpty then
+                UncertainBoardReader() :> IBoardReader, Some (sprintf "No templates found in '%s'" templatesPath)
+            else
+                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
         | Some value, _ when not (String.IsNullOrWhiteSpace value) ->
             FenBoardReader(value) :> IBoardReader, None
         | _, value when not (String.IsNullOrWhiteSpace value) ->
@@ -117,7 +133,12 @@ module Program =
         | _ when options.IsDemo ->
             FenBoardReader(startingFen) :> IBoardReader, None
         | _ ->
-            UncertainBoardReader() :> IBoardReader, Some "YOLO model or labels missing"
+            let templates = PieceTemplates.loadFromDirectory "templates"
+
+            if templates.IsEmpty then
+                UncertainBoardReader() :> IBoardReader, Some "No templates found in 'templates'"
+            else
+                TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
 
     let statusWithWarning status warning =
         warning

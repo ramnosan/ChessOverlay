@@ -84,6 +84,7 @@ module ArchitectureView =
         | _, "OverlayWindow"
         | _, "BoardSelectionWindow" -> "Overlay UI", 1
         | _, "BoardDetection"
+        | _, "TemplatePieceDetection"
         | _, "YoloPieceDetection" -> "Screen And Piece Detection", 2
         | _, "AttackCalculator" -> "Chess Rules", 3
         | _, "Domain" -> "Domain Model", 4
@@ -483,7 +484,7 @@ module ArchitectureView =
             else
                 model.Cycles
                 |> List.map (fun cycle ->
-                    let path = html (String.Join(" -> ", cycle.Path))
+                    let path = html (String.Join(" → ", cycle.Path))
                     $"<li>{path}</li>")
                 |> String.concat Environment.NewLine
                 |> sprintf "<ul>%s</ul>"
@@ -520,6 +521,9 @@ aside {{ position: sticky; top: 68px; align-self: start; border-left: 1px solid 
 .edge {{ padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }}
 .edge.cycle {{ color: var(--warn); font-weight: 700; }}
 .empty {{ color: var(--muted); }}
+.dep-in {{ color: #0066aa; font-weight: 600; }}
+.dep-out {{ color: #885500; font-weight: 600; }}
+.arrow {{ font-size: 15px; margin-right: 4px; }}
 @media (max-width: 900px) {{ main {{ grid-template-columns: 1fr; }} aside {{ position: static; border-left: 0; padding-left: 0; }} .toolbar {{ flex-wrap: wrap; }} }}
 </style>
 </head>
@@ -553,9 +557,10 @@ const nodes = () => document.querySelectorAll("#diagram-svg .node");
 const edgePaths = () => document.querySelectorAll("#diagram-svg .edges path");
 function describeEdge(edge, direction) {{
   const other = direction === "out" ? byId[edge.to] : byId[edge.from];
-  const arrow = direction === "out" ? "uses" : "used by";
+  const arrow = direction === "out" ? "→" : "←";
+  const arrowClass = direction === "out" ? "dep-out" : "dep-in";
   const symbols = edge.symbols.length ? " via " + edge.symbols.join(", ") : "";
-  return `<div class="edge ${{edge.cycle ? "cycle" : ""}}"><strong>${{arrow}}</strong> ${{other.name}}<br><span>${{other.file}}${{symbols}}</span></div>`;
+  return `<div class="edge ${{edge.cycle ? "cycle" : ""}}"><span class="arrow ${{arrowClass}}">${{arrow}}</span><strong>${{other.name}}</strong><br><span>${{other.file}}${{symbols}}</span></div>`;
 }}
 function selectModule(id) {{
   nodes().forEach(node => node.classList.toggle("selected", node.dataset.module === id));

@@ -111,7 +111,7 @@ module ProgramTests =
         Assert.IsType<FenBoardReader>(demoReader) |> ignore
         Assert.True(demoWarning.IsNone)
         Assert.IsType<UncertainBoardReader>(defaultReader) |> ignore
-        Assert.Equal(Some "YOLO model or labels missing", defaultWarning)
+        Assert.Equal(Some "No templates found in 'templates'", defaultWarning)
 
     [<Fact>]
     let ``Reader creation reports missing yolo files`` () =
