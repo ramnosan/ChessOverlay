@@ -1,9 +1,50 @@
 namespace ChessOverlay.Tests
 
+open System.IO
 open Xunit
 open ChessOverlay
 
 module ProgramTests =
+    [<Fact>]
+    let ``tryParseGeometry accepts valid left,top,size string`` () =
+        Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, BoardGeometryStorage.tryParseGeometry "10,20,300")
+
+    [<Fact>]
+    let ``tryParseGeometry rejects wrong field count`` () =
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "10,20")
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "10,20,300,400")
+
+    [<Fact>]
+    let ``tryParseGeometry rejects non-numeric fields`` () =
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "10,top,300")
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "left,20,300")
+
+    [<Fact>]
+    let ``tryParseGeometry rejects zero or negative size`` () =
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "10,20,0")
+        Assert.Equal(None, BoardGeometryStorage.tryParseGeometry "10,20,-1")
+
+    [<Fact>]
+    let ``tryLoadFrom returns None when file does not exist`` () =
+        Assert.Equal(None, BoardGeometryStorage.tryLoadFrom (Path.GetTempPath() + "nonexistent_chess_file.txt"))
+
+    [<Fact>]
+    let ``tryLoadFrom parses valid geometry file`` () =
+        let path = Path.GetTempFileName()
+        try
+            File.WriteAllText(path, "5,10,200")
+            Assert.Equal(Some { Left = 5; Top = 10; Size = 200 }, BoardGeometryStorage.tryLoadFrom path)
+        finally
+            File.Delete(path)
+
+    [<Fact>]
+    let ``tryLoadFrom returns None for malformed file content`` () =
+        let path = Path.GetTempFileName()
+        try
+            File.WriteAllText(path, "garbage")
+            Assert.Equal(None, BoardGeometryStorage.tryLoadFrom path)
+        finally
+            File.Delete(path)
     [<Fact>]
     let ``Startup options parse board geometry and flags`` () =
         let options =

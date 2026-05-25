@@ -383,3 +383,218 @@ module TemplatePieceDetectionTests =
             | None -> failwith "Expected template reader output."
         finally
             disposeAllTemplates templates
+
+    // Draw a Lichess-style move-hint dot (a filled circle using 65% of the square's background
+    // brightness, the same visual weight shown in the bug-report screenshot).
+    let private drawMoveHintDot (g: Graphics) (squareSize: int) (file: int) (rank: int) (board: Bitmap) =
+        let squareX = file * squareSize
+        let squareY = rank * squareSize
+        let bg = board.GetPixel(squareX + squareSize / 2, squareY + squareSize / 2)
+        let dot = Color.FromArgb(int (float bg.R * 0.65), int (float bg.G * 0.65), int (float bg.B * 0.65))
+        use brush = new SolidBrush(dot)
+        let margin = squareSize / 4
+        g.FillEllipse(brush, squareX + margin, squareY + margin, squareSize - margin * 2, squareSize - margin * 2)
+
+    [<Fact>]
+    let ``Diagnostic dot square scores`` () =
+        // Use the committed fixture templates (chess.com style) to check NCC/presence scores.
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+
+        try
+            let prepared = SimilarityComparison.prepareTemplates (templates |> Array.toSeq)
+            let size = 800
+            let squareSize = size / 8
+
+            // Chess.com board colours matching what the fixture templates were calibrated from.
+            use bgBitmap = new Bitmap(size, size)
+            (use g = Graphics.FromImage(bgBitmap)
+             fillSquares g size Set.empty)
+
+            // Draw a prominent circle on a dark square (file 0, rank 4 = a4).
+            use testBitmap = new Bitmap(size, size)
+            (use g = Graphics.FromImage(testBitmap)
+             g.DrawImage(bgBitmap, 0, 0)
+             drawMoveHintDot g squareSize 0 4 bgBitmap)
+
+            let geometry = { Left = 0; Top = 0; Size = size }
+            let darkSquare = { File = 0; Rank = 4 }
+
+            match PieceBitmap.extractSquareBitmap testBitmap geometry darkSquare with
+            | None -> failwith "Could not extract square"
+            | Some squareBmp ->
+                use squareBmp = squareBmp
+                let gray = SimilarityComparison.toGrayscaleArray squareBmp
+                let presence = SimilarityComparison.piecePresenceScore gray
+                let matches = SimilarityComparison.rankMatches prepared gray |> List.truncate 5
+
+                let minPresenceScore =
+                    prepared
+                    |> Array.map (fun (_, g, _) -> SimilarityComparison.piecePresenceScore g)
+                    |> Array.filter (fun s -> s > 0.0)
+                    |> Array.min
+
+                let topMatchInfo =
+                    matches
+                    |> List.map (fun (p, s) -> sprintf "%A=%.3f" p.Kind s)
+                    |> String.concat " "
+
+                Assert.True(
+                    false,
+                    sprintf "presence=%.2f minTemplate=%.2f threshold(0.35)=%.2f threshold(0.55)=%.2f | %s"
+                        presence minPresenceScore (minPresenceScore * 0.35) (minPresenceScore * 0.55)
+                        topMatchInfo)
+        finally
+            disposeAllTemplates templates
+
+    [<Fact>]
+    let ``Template reader does not detect pawn on dark empty square with move-hint dot`` () =
+        // Regression: dark squares with Lichess move-hint dots were falsely detected as pawns.
+        let root = tempRoot ()
+        use srcBitmap = new Bitmap(fixturePath "chess_board_start2.png")
+        let size = srcBitmap.Width
+        let squareSize = size / 8
+        let geometry = { Left = 0; Top = 0; Size = size }
+        PieceTemplateCalibration.saveStartingPositionTemplates srcBitmap geometry root |> ignore
+        let templates = PieceTemplates.loadAllFromDirectory root
+
+        try
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
+
+            // Draw a move-hint dot on a known empty dark square (rank 4, file 0 → a5, dark square).
+            use testBitmap = new Bitmap(size, size)
+            (use g = Graphics.FromImage(testBitmap)
+             g.DrawImage(srcBitmap, 0, 0)
+             drawMoveHintDot g squareSize 0 4 srcBitmap)
+
+            let dotSquare = { File = 0; Rank = 4 }
+
+            match reader.Read(testBitmap, geometry) with
+            | Some reading ->
+                Assert.True(
+                    BoardState.tryPieceAt dotSquare reading.Board |> Option.isNone,
+                    sprintf "%s has a move-hint dot but was detected as %A"
+                        (Squares.name dotSquare)
+                        (BoardState.tryPieceAt dotSquare reading.Board))
+            | None -> failwith "Expected template reader output."
+        finally
+            disposeAllTemplates templates
+
+    // Crop the two stacked squares of the premove fixture into field-template
+    // reference bitmaps (top = dark-square dot, bottom = light-square dot).
+    let private loadFieldTemplatesFromFixture () : Bitmap array =
+        let bitmap = new Bitmap(fixturePath "two_premove_fields_that should not be classified as pawns.png")
+        try
+            let squareSize = bitmap.Height / 2
+            let geometry = { Left = 0; Top = 0; Size = squareSize * 8 }
+            [| 0; 1 |]
+            |> Array.choose (fun rank -> PieceBitmap.extractSquareBitmap bitmap geometry { File = 0; Rank = rank })
+        finally
+            bitmap.Dispose()
+
+    // Read the premove fixture (two vertically stacked highlighted squares) and
+    // return any of the two squares that came back occupied. A board of eight
+    // half-height squares makes the reader crop exactly those two and clamp the
+    // remaining off-image squares to nothing.
+    let private misreadPremoveSquares (reader: IBoardReader) =
+        use bitmap = new Bitmap(fixturePath "two_premove_fields_that should not be classified as pawns.png")
+        let squareSize = bitmap.Height / 2
+        let geometry = { Left = 0; Top = 0; Size = squareSize * 8 }
+
+        match reader.Read(bitmap, geometry) with
+        | Some reading ->
+            [ 0; 1 ]
+            |> List.choose (fun rank ->
+                let square = { File = 0; Rank = rank }
+                BoardState.tryPieceAt square reading.Board
+                |> Option.map (fun piece -> sprintf "%s=%A" (Squares.name square) piece))
+        | None -> failwith "Expected template reader output."
+
+    [<Fact>]
+    let ``Template reader does not classify premove highlight squares as pawns`` () =
+        // Regression from a real capture: two empty squares carrying chess.com
+        // premove highlight dots (one dark, one light) were falsely read as pawns.
+        // With no field templates this exercises the symmetry fallback.
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+
+        try
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
+            let misread = misreadPremoveSquares reader
+
+            Assert.True(
+                List.isEmpty misread,
+                sprintf "Premove highlight squares were detected as pieces: %s" (String.concat ", " misread))
+        finally
+            disposeAllTemplates templates
+
+    [<Fact>]
+    let ``Field templates classify premove dots as empty squares`` () =
+        // The "field" class competes with the pieces: a move-hint dot reference
+        // out-scores every piece on a dot square, so the square stays empty.
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+        let fields = loadFieldTemplatesFromFixture ()
+
+        try
+            let reader = TemplateBoardReader(templates, fields, 0.35) :> IBoardReader
+            let misread = misreadPremoveSquares reader
+
+            Assert.True(
+                List.isEmpty misread,
+                sprintf "Premove dots beat the field templates and were read as pieces: %s" (String.concat ", " misread))
+        finally
+            disposeAllTemplates templates
+            fields |> Array.iter (fun b -> b.Dispose())
+
+    [<Fact>]
+    let ``Field templates leave a full starting position detected`` () =
+        // The field class must only win on empty highlights: with field templates
+        // loaded, every real piece on a normal board must still be detected.
+        use bitmap = new Bitmap(fixturePath "chess_screenshot_starting position.png")
+        let geometry = { Left = 0; Top = 0; Size = bitmap.Width }
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+        let fields = loadFieldTemplatesFromFixture ()
+
+        try
+            let reader = TemplateBoardReader(templates, fields, 0.35) :> IBoardReader
+
+            match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
+            | Some reading, Ok expected ->
+                Assert.Equal(1.0, reading.Confidence)
+                Assert.True((expected = reading.Board), candidateSummary reading expected)
+            | None, _ -> failwith "Expected template reader output."
+            | _, Error message -> failwith message
+        finally
+            disposeAllTemplates templates
+            fields |> Array.iter (fun b -> b.Dispose())
+
+    [<Fact>]
+    let ``Template reader does not detect pawn on light empty square with move-hint dot`` () =
+        // Regression: light squares with Lichess move-hint dots were falsely detected as pawns.
+        let root = tempRoot ()
+        use srcBitmap = new Bitmap(fixturePath "chess_board_start2.png")
+        let size = srcBitmap.Width
+        let squareSize = size / 8
+        let geometry = { Left = 0; Top = 0; Size = size }
+        PieceTemplateCalibration.saveStartingPositionTemplates srcBitmap geometry root |> ignore
+        let templates = PieceTemplates.loadAllFromDirectory root
+
+        try
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
+
+            // Draw a move-hint dot on a known empty light square (rank 4, file 1 → b5, light square).
+            use testBitmap = new Bitmap(size, size)
+            (use g = Graphics.FromImage(testBitmap)
+             g.DrawImage(srcBitmap, 0, 0)
+             drawMoveHintDot g squareSize 1 4 srcBitmap)
+
+            let dotSquare = { File = 1; Rank = 4 }
+
+            match reader.Read(testBitmap, geometry) with
+            | Some reading ->
+                Assert.True(
+                    BoardState.tryPieceAt dotSquare reading.Board |> Option.isNone,
+                    sprintf "%s has a move-hint dot but was detected as %A"
+                        (Squares.name dotSquare)
+                        (BoardState.tryPieceAt dotSquare reading.Board))
+            | None -> failwith "Expected template reader output."
+        finally
+            disposeAllTemplates templates

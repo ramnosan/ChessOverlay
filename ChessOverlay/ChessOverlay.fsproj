@@ -21,4 +21,10 @@
     <None Include="..\specification.md" Link="specification.md" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="FieldTemplates\*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

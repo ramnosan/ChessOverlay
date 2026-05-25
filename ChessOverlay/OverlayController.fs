@@ -99,6 +99,7 @@ type OverlayController(
                 match reading with
                 | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
                     let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
+                    let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
 
                     measure
                         "overlay-update"
@@ -109,6 +110,7 @@ type OverlayController(
                                         {
                                             Geometry = screenGeometry
                                             AttackArrows = attackArrows
+                                            HangingSquares = hangingSquares
                                             DetectedPieces = Some boardReading.Board
                                         }))
                 | _ ->

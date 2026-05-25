@@ -64,6 +64,16 @@ module PieceTemplates =
     let loadFromDirectory (path: string) : Map<Piece, Bitmap> =
         loadAllFromDirectory path |> Map.ofArray
 
+    // Field templates are unlabelled reference images of non-piece square markers
+    // (move-hint / premove dots), so every image in the directory is loaded as-is.
+    let loadFieldTemplates (path: string) : Bitmap array =
+        if not (Directory.Exists path) then
+            Array.empty
+        else
+            [| yield! Directory.GetFiles(path, "*.png")
+               yield! Directory.GetFiles(path, "*.bmp") |]
+            |> Array.map (fun filePath -> new Bitmap(filePath))
+
 module PieceBitmap =
     let extractSquareBitmap (bitmap: Bitmap) (geometry: BoardGeometry) (square: Square) : Bitmap option =
         let rect = geometry.GetSquareRectangle square
@@ -88,11 +98,6 @@ module PieceBitmap =
 module PieceTemplateCalibration =
     let private startingPosition = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
-    let private colorName piece =
-        match piece.Color with
-        | Black -> "black"
-        | White -> "white"
-
     let private kindName piece =
         match piece.Kind with
         | King -> "king"
@@ -103,7 +108,8 @@ module PieceTemplateCalibration =
         | Pawn -> "pawn"
 
     let private templateFileName piece square =
-        sprintf "%s_%s_%s.png" (colorName piece) (kindName piece) (Squares.name square)
+        let color = match piece.Color with Black -> "black" | White -> "white"
+        sprintf "%s_%s_%s.png" color (kindName piece) (Squares.name square)
 
     let saveStartingPositionTemplates (bitmap: Bitmap) (geometry: BoardGeometry) (path: string) =
         match Fen.parseBoard startingPosition with
@@ -415,6 +421,55 @@ module SimilarityComparison =
             let variance = max 0.0 (totalSquared / float count - mean * mean)
             sqrt variance
 
+    // Correlation of the centre region against its own vertical mirror. A
+    // move-hint / premove dot is a filled disk, symmetric about the square's
+    // horizontal midline, so it scores ~1. Every real piece is bottom-heavy
+    // (wider base than top) and never approaches that, so a near-perfect mirror
+    // marks an empty highlighted square rather than a piece.
+    let verticalSymmetry (sample: float[]) =
+        let centerStart = sampleSize / 4
+        let centerEnd = sampleSize - centerStart
+
+        let mutable topSum = 0.0
+        let mutable bottomSum = 0.0
+        let mutable count = 0
+
+        for y in centerStart .. centerEnd - 1 do
+            for x in centerStart .. centerEnd - 1 do
+                topSum <- topSum + sample[y * sampleSize + x]
+                bottomSum <- bottomSum + sample[(sampleSize - 1 - y) * sampleSize + x]
+                count <- count + 1
+
+        if count = 0 then
+            1.0
+        else
+            let topMean = topSum / float count
+            let bottomMean = bottomSum / float count
+            let mutable num = 0.0
+            let mutable topSq = 0.0
+            let mutable bottomSq = 0.0
+
+            for y in centerStart .. centerEnd - 1 do
+                for x in centerStart .. centerEnd - 1 do
+                    let t = sample[y * sampleSize + x] - topMean
+                    let b = sample[(sampleSize - 1 - y) * sampleSize + x] - bottomMean
+                    num <- num + t * b
+                    topSq <- topSq + t * t
+                    bottomSq <- bottomSq + b * b
+
+            if topSq < 1.0 || bottomSq < 1.0 then 1.0 else num / sqrt (topSq * bottomSq)
+
+    // A move-hint / premove dot is a round disk, so among the pieces it can only
+    // resemble a pawn (the one compact, rounded silhouette) and the matcher duly
+    // ranks it as one. Real pawns are bottom-heavy and stay well under this
+    // symmetry even with a few pixels of board misalignment, so a pawn-shaped
+    // match this symmetric is an empty highlighted square. Restricting the test
+    // to pawns leaves the rook — the most symmetric real piece — untouched.
+    let private moveHintSymmetryThreshold = 0.95
+
+    let looksLikeMoveHintDot (piece: Piece) (sample: float[]) =
+        piece.Kind = Pawn && verticalSymmetry sample >= moveHintSymmetryThreshold
+
     // Manual board selection is never pixel-perfect, so the cropped square is
     // often shifted a few pixels from the calibrated template. Compare the
     // template against the sample at a small range of integer offsets and keep
@@ -497,6 +552,24 @@ module SimilarityComparison =
         |> Array.sortByDescending snd
         |> Array.toList
 
+    // Field templates are non-piece reference images (move-hint / premove dots).
+    // They carry no piece label: they exist only to out-score the pieces on the
+    // squares that are actually empty highlights, so the reader can tell a dot
+    // apart from a piece by letting both compete on the same correlation.
+    //
+    // Unlike a piece, a dot is a solid disk with no internal texture, so the
+    // background-isolating, texture-matching path used for pieces collapses to
+    // zero variance on it. What identifies a dot is its shape against the square,
+    // so it is matched as the whole square (full mask) instead.
+    let prepareFieldTemplates (bitmaps: seq<Bitmap>) : (float[] * bool[]) array =
+        bitmaps
+        |> Seq.map (fun bmp -> toGrayscaleArray bmp, Array.create (sampleSize * sampleSize) true)
+        |> Seq.toArray
+
+    let bestMatchScore (templates: (float[] * bool[]) array) (squareGray: float[]) : float =
+        templates
+        |> Array.fold (fun best (templateGray, mask) -> max best (nccTolerant templateGray mask squareGray)) -1.0
+
     let private acceptanceThreshold threshold piece =
         match piece.Kind with
         | Pawn -> threshold * 0.85
@@ -517,8 +590,9 @@ module SimilarityComparison =
         |> rankMatches templates
         |> tryAcceptBestMatch threshold
 
-type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
+type TemplateBoardReader(templates: seq<Piece * Bitmap>, fieldTemplates: seq<Bitmap>, threshold: float) =
     let preparedTemplates = SimilarityComparison.prepareTemplates templates
+    let preparedFieldTemplates = SimilarityComparison.prepareFieldTemplates fieldTemplates
     let piecePresenceThreshold =
         preparedTemplates
         |> Array.map (fun (_, gray, _) -> SimilarityComparison.piecePresenceScore gray)
@@ -530,8 +604,11 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
                 Array.sortInPlace scores
                 Array.min scores * 0.35
 
+    new(templates: seq<Piece * Bitmap>, threshold: float) =
+        TemplateBoardReader(templates, Seq.empty, threshold)
+
     new(templates: Map<Piece, Bitmap>, threshold: float) =
-        TemplateBoardReader(templates |> Map.toSeq, threshold)
+        TemplateBoardReader(templates |> Map.toSeq, Seq.empty, threshold)
 
     interface IBoardReader with
         member _.Read(bitmap: Bitmap, geometry: BoardGeometry) =
@@ -557,12 +634,28 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
 
                         candidates <- Map.add square squareCandidates candidates
 
+                        // Let the field (move-hint dot) templates compete with the
+                        // pieces: when a dot reference matches this square better
+                        // than any piece, the square is an empty highlight, not a
+                        // piece, so leave it unoccupied.
+                        let bestPieceScore =
+                            match rankedMatches with
+                            | (_, score) :: _ -> score
+                            | [] -> -1.0
+
+                        let isField =
+                            SimilarityComparison.bestMatchScore preparedFieldTemplates squareGray >= bestPieceScore
+
                         match SimilarityComparison.tryAcceptBestCandidate threshold rankedMatches with
-                        | Some(piece, score) ->
-                            if SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold || score >= threshold then
+                        | Some(piece, score) when not isField ->
+                            let presentEnough =
+                                SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold
+                                || score >= threshold
+
+                            if presentEnough && not (SimilarityComparison.looksLikeMoveHintDot piece squareGray) then
                                 board <- Map.add square piece board
                                 matchCount <- matchCount + 1
-                        | None -> ()
+                        | _ -> ()
 
                 let confidence =
                     if matchCount = 0 then 0.0

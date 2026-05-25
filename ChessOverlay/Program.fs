@@ -12,22 +12,25 @@ module BoardGeometryStorage =
 
     let private storagePath = Path.Combine(storageDir, "board_area.txt")
 
-    let tryLoad () =
-        try
-            if File.Exists(storagePath) then
-                let text = File.ReadAllText(storagePath).Trim()
+    let tryParseGeometry (text: string) =
+        match text.Split(',') with
+        | [| leftStr; topStr; sizeStr |] ->
+            match Int32.TryParse leftStr, Int32.TryParse topStr, Int32.TryParse sizeStr with
+            | (true, left), (true, top), (true, size) when size > 0 ->
+                Some { Left = left; Top = top; Size = size }
+            | _ -> None
+        | _ -> None
 
-                match text.Split(',') with
-                | [| leftStr; topStr; sizeStr |] ->
-                    match Int32.TryParse leftStr, Int32.TryParse topStr, Int32.TryParse sizeStr with
-                    | (true, left), (true, top), (true, size) when size > 0 ->
-                        Some { Left = left; Top = top; Size = size }
-                    | _ -> None
-                | _ -> None
+    let tryLoadFrom path =
+        try
+            if File.Exists(path) then
+                File.ReadAllText(path).Trim() |> tryParseGeometry
             else
                 None
         with _ ->
             None
+
+    let tryLoad () = tryLoadFrom storagePath
 
     let save (geometry: BoardGeometry) =
         try
@@ -128,13 +131,20 @@ module Program =
     // leaves headroom for the few-pixel misalignment of a hand-selected board.
     let private defaultSimilarityThreshold = 0.35
 
+    // Move-hint / premove dots ship with the app (an empty highlighted square
+    // carries no piece to calibrate from), so they load from beside the binary
+    // rather than the user-calibrated piece-templates directory.
+    let private fieldTemplatesPath =
+        System.IO.Path.Combine(AppContext.BaseDirectory, "FieldTemplates")
+
     let private createTemplateReader templatesPath =
         let templates = PieceTemplates.loadAllFromDirectory templatesPath
 
         if Array.isEmpty templates then
             UncertainBoardReader() :> IBoardReader, Some(sprintf "No templates found in '%s'" templatesPath)
         else
-            TemplateBoardReader(templates, defaultSimilarityThreshold) :> IBoardReader, None
+            let fieldTemplates = PieceTemplates.loadFieldTemplates fieldTemplatesPath
+            TemplateBoardReader(templates, fieldTemplates, defaultSimilarityThreshold) :> IBoardReader, None
 
     let private createFenReader value =
         FenBoardReader(value) :> IBoardReader, None

@@ -26,11 +26,13 @@ module AttackCalculator =
             Squares.tryCreate (square.File + fileDelta) (square.Rank + rankDelta))
         |> List.map List.singleton
 
+    let private pawnRaysWithDir pawnRankDelta square =
+        steps [ -1, pawnRankDelta; 1, pawnRankDelta ] square
+
     // Only the enemy (top) player's attacks are ever highlighted, and the top
     // player moves down the screen regardless of colour, so pawns always attack
     // toward increasing ranks here.
-    let private pawnRays square =
-        steps [ -1, 1; 1, 1 ] square
+    let private pawnRays square = pawnRaysWithDir 1 square
 
     let private knightRays square =
         steps [ -2, -1; -2, 1; -1, -2; -1, 2; 1, -2; 1, 2; 2, -1; 2, 1 ] square
@@ -55,14 +57,17 @@ module AttackCalculator =
         |> List.map (fun (fileDelta, rankDelta) -> rayLine board square fileDelta rankDelta)
         |> List.filter (not << List.isEmpty)
 
-    let attackRaysForPiece board square piece : Square list list =
+    let private attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
         match piece.Kind with
-        | Pawn -> pawnRays square
+        | Pawn -> pawnRaysWithDir pawnRankDelta square
         | Knight -> knightRays square
         | Bishop -> slidingRays board square bishopDirections
         | Rook -> slidingRays board square rookDirections
         | Queen -> slidingRays board square queenDirections
         | King -> kingRays square
+
+    let attackRaysForPiece board square piece : Square list list =
+        attackRaysForPieceWithDir board square piece 1
 
     let attacksForPiece board square piece =
         attackRaysForPiece board square piece
@@ -109,6 +114,10 @@ module AttackCalculator =
         | Some color -> attackedSquaresByColor board color
         | None -> Set.empty
 
+    let private pieceArrows board square piece =
+        attackRaysForPiece board square piece
+        |> List.choose (fun ray -> List.tryLast ray |> Option.map (fun far -> square, far))
+
     // One arrow per direction a piece can move, ending at the farthest square
     // it can see/attack along that ray.
     let enemyAttackArrows (board: BoardState) : (Square * Square) list =
@@ -117,11 +126,36 @@ module AttackCalculator =
         | Some color ->
             board
             |> Map.toSeq
-            |> Seq.collect (fun (square, piece) ->
-                if piece.Color = color then
-                    attackRaysForPiece board square piece
-                    |> List.choose (List.tryLast >> Option.map (fun farthest -> square, farthest))
-                    |> Seq.ofList
-                else
-                    Seq.empty)
+            |> Seq.filter (fun (_, piece) -> piece.Color = color)
+            |> Seq.collect (fun (square, piece) -> pieceArrows board square piece)
             |> Seq.toList
+
+    // Friendly (bottom) pieces that are attacked by the enemy and not defended
+    // by another friendly piece. Friendly pawns attack upward (rankDelta = -1).
+    let hangingSquares (board: BoardState) : Set<Square> =
+        match enemyColor board with
+        | None -> Set.empty
+        | Some enemy ->
+            let friendly = if enemy = White then Black else White
+
+            let friendlyDefends =
+                board
+                |> Map.toSeq
+                |> Seq.choose (fun (square, piece) ->
+                    if piece.Color = friendly then
+                        Some(attackRaysForPieceWithDir board square piece -1 |> List.concat |> Set.ofList)
+                    else
+                        None)
+                |> fun attacks ->
+                    if Seq.isEmpty attacks then Set.empty else Set.unionMany attacks
+
+            let enemyAttacks = attackedSquaresByColor board enemy
+
+            board
+            |> Map.toSeq
+            |> Seq.filter (fun (square, piece) ->
+                piece.Color = friendly
+                && Set.contains square enemyAttacks
+                && not (Set.contains square friendlyDefends))
+            |> Seq.map fst
+            |> Set.ofSeq

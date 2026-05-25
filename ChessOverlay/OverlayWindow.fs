@@ -10,8 +10,9 @@ type OverlayWindow() as this =
     inherit Form()
 
     let transparentColor = Color.Magenta
-    let arrowColor = Color.FromArgb(160, 220, 40, 40)
+    let arrowColor = Color.FromArgb(255, 210, 30, 30)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
+    let hangingColor = Color.FromArgb(210, 255, 140, 0)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
     let mutable frame: OverlayFrame option = None
@@ -73,6 +74,7 @@ type OverlayWindow() as this =
                 {
                     Geometry = geometry
                     AttackArrows = []
+                    HangingSquares = Set.empty
                     DetectedPieces = None
                 }
 
@@ -87,7 +89,7 @@ type OverlayWindow() as this =
         match frame with
         | None -> this.PaintStatus args.Graphics
         | Some current ->
-            let penWidth = single current.Geometry.SquareSize * 0.06f
+            let penWidth = single current.Geometry.SquareSize * 0.035f
             use arrowPen = new Pen(arrowColor, penWidth)
             arrowPen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(3.5f, 3.5f)
             use outlinePen = new Pen(outlineColor, 3.0f)
@@ -98,6 +100,18 @@ type OverlayWindow() as this =
                 let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
                 let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
                 args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
+
+            use hangingPen = new Pen(hangingColor, penWidth * 1.8f)
+
+            for sq in current.HangingSquares do
+                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                let inset = rect.Width * 0.1f
+                args.Graphics.DrawEllipse(
+                    hangingPen,
+                    rect.X + inset,
+                    rect.Y + inset,
+                    rect.Width - 2.0f * inset,
+                    rect.Height - 2.0f * inset)
 
             let boardRect =
                 RectangleF(
