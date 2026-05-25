@@ -21,11 +21,11 @@ ALL usage:
   dotnet run --project ChessOverlay.Quality -- all
 
 DRY usage:
-  dotnet run --project ChessOverlay.Quality -- dry --threshold 0.86 --min-lines 8
+  dotnet run --project ChessOverlay.Quality -- dry --threshold 0.78 --min-lines 8
   dotnet run --project ChessOverlay.Quality -- dry --format edn ChessOverlay
 
 DRY options:
-  --threshold <n>    Minimum structural similarity score. Default: 0.82.
+  --threshold <n>    Minimum structural similarity score. Default: 0.72.
   --min-lines <n>    Minimum source lines in a candidate region. Default: 4.
   --min-tokens <n>   Minimum normalized tokens in a candidate region. Default: 20.
   --format <f>       text or edn. Default: text.
@@ -173,7 +173,7 @@ ARCH options:
             {
                 Root = findRepositoryRoot ()
                 Inputs = dryInputs args
-                Threshold = parseFloat "--threshold" 0.82 args
+                Threshold = parseFloat "--threshold" 0.72 args
                 MinimumLines = parseInt "--min-lines" 4 args
                 MinimumTokens = parseInt "--min-tokens" 20 args
                 Format = dryFormat args

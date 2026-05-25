@@ -22,7 +22,7 @@ module DryDuplicationTests =
         {
             Root = root
             Inputs = [ "ChessOverlay" ]
-            Threshold = 0.82
+            Threshold = 0.72
             MinimumLines = 4
             MinimumTokens = 12
             Format = "text"
@@ -71,7 +71,7 @@ module DryDuplicationTests =
 
         Assert.Equal("ChessOverlay/Left.fs", duplicate.Left.File)
         Assert.Equal("ChessOverlay/Right.fs", duplicate.Right.File)
-        Assert.True(duplicate.Score >= 0.82)
+        Assert.True(duplicate.Score >= 0.72)
 
     [<Fact>]
     let ``DRY detector respects minimum token threshold`` () =
