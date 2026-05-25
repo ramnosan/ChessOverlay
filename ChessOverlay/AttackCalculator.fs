@@ -256,23 +256,31 @@ module AttackCalculator =
         |> Map.remove fromSquare
         |> Map.add toSquare piece
 
-    let private forkedUndefendedTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
+    let private forkedVulnerableTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
-        let undefendedTargets =
+        let vulnerableTargets =
             movedBoard
             |> Map.toSeq
             |> Seq.choose (fun (square, targetPiece) ->
                 if
                     targetPiece.Color = targetColor
-                    && not (
-                        defendedAgainstAttackers
+                    && (targetPiece.Kind = King
+                        || not (
+                            defendedAgainstAttackers
+                                movedBoard
+                                targetColor
+                                targetPawnRankDelta
+                                piece.Color
+                                attackerPawnRankDelta
+                                square
+                        )
+                        || lowerValueAttacker
                             movedBoard
-                            targetColor
-                            targetPawnRankDelta
                             piece.Color
                             attackerPawnRankDelta
                             square
+                            targetPiece
                     )
                 then
                     Some square
@@ -280,11 +288,11 @@ module AttackCalculator =
                     None)
             |> Set.ofSeq
 
-        Set.intersect (attacksForPieceWithDir movedBoard toSquare piece attackerPawnRankDelta) undefendedTargets
+        Set.intersect (attacksForPieceWithDir movedBoard toSquare piece attackerPawnRankDelta) vulnerableTargets
 
     // One-move fork opportunities for the friendly bottom player. Each result
     // is an arrow from the current square to the square where the move would
-    // attack two or more undefended enemy pieces.
+    // attack two or more vulnerable enemy pieces.
     let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
         match enemyColor board with
         | None -> []
@@ -298,7 +306,7 @@ module AttackCalculator =
                 moveSquaresForPiece board fromSquare piece -1
                 |> Seq.choose (fun toSquare ->
                     let forked =
-                        forkedUndefendedTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
+                        forkedVulnerableTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
 
                     if Set.count forked >= 2 then
                         Some(fromSquare, toSquare)

@@ -320,9 +320,27 @@ module AttackCalculatorTests =
         Assert.Contains(({ File = 3; Rank = 6 }, { File = 5; Rank = 5 }), arrows)
 
     [<Fact>]
-    let ``friendlyForkMoveArrows ignores forks where enemy pieces are defended`` () =
-        // From f3 the knight would attack both black rooks, but the rooks
-        // defend each other along the fourth rank.
-        let board = parse "8/8/8/8/3r3r/8/3N4/8 w - - 0 1"
+    let ``friendlyForkMoveArrows reports a real game royal fork with defended targets`` () =
+        // ChessWorld, Papas vs Oreopoulos, Puzzle ID 160: 1.Nxd6+ forks the
+        // black king on f7 and queen on c4 from the published FEN.
+        let board = parse "2r2r2/1n3kb1/p2p2p1/1p1p1nBp/1PqPN2P/2P3P1/Q4PB1/R1R3K1 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 4; Rank = 4 }, { File = 3; Rank = 2 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows reports Bonin Alburt royal fork from published puzzle FEN`` () =
+        // W.T. Harvey's Bonin vs Alburt puzzle gives this FEN with solution
+        // Nf5+, a fork of the defended black king on g7 and queen on e7.
+        let board = parse "5b2/2r1q1k1/p2pQ1p1/P1pPp2p/4P3/2P1NR1P/6PK/8 w - - 1 0"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 4; Rank = 5 }, { File = 5; Rank = 3 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows ignores defended equal-value targets`` () =
+        // From f3 the knight would attack both black knights, but the bishop on
+        // f6 defends both and the exchange is not favorable.
+        let board = parse "8/8/5b2/8/3n3n/8/3N4/8 w - - 0 1"
 
         Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
