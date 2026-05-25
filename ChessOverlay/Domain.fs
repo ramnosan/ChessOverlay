@@ -65,7 +65,7 @@ and PieceMatchCandidate =
 type OverlayFrame =
     {
         Geometry: BoardGeometry
-        HighlightedSquares: Set<Square>
+        AttackArrows: (Square * Square) list
         DetectedPieces: BoardState option
     }
 

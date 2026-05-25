@@ -4,6 +4,38 @@ open System
 open System.Diagnostics.CodeAnalysis
 open System.Windows.Forms
 
+module BoardGeometryStorage =
+    open System.IO
+
+    let private storageDir =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ChessOverlay")
+
+    let private storagePath = Path.Combine(storageDir, "board_area.txt")
+
+    let tryLoad () =
+        try
+            if File.Exists(storagePath) then
+                let text = File.ReadAllText(storagePath).Trim()
+
+                match text.Split(',') with
+                | [| leftStr; topStr; sizeStr |] ->
+                    match Int32.TryParse leftStr, Int32.TryParse topStr, Int32.TryParse sizeStr with
+                    | (true, left), (true, top), (true, size) when size > 0 ->
+                        Some { Left = left; Top = top; Size = size }
+                    | _ -> None
+                | _ -> None
+            else
+                None
+        with _ ->
+            None
+
+    let save (geometry: BoardGeometry) =
+        try
+            Directory.CreateDirectory(storageDir) |> ignore
+            File.WriteAllText(storagePath, sprintf "%d,%d,%d" geometry.Left geometry.Top geometry.Size)
+        with _ ->
+            ()
+
 module Program =
     let private startingFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1"
 
@@ -81,16 +113,6 @@ module Program =
         | Some geometry -> Some geometry
         | None when options.IsDemo -> Some(centeredDemoGeometry ())
         | None -> selectBoardGeometry ()
-
-    [<ExcludeFromCodeCoverage>]
-    let private selectBoardGeometry () =
-        use selector = new BoardSelectionWindow()
-        let result = selector.ShowDialog()
-
-        if result = DialogResult.OK then
-            selector.SelectedGeometry
-        else
-            None
 
     let private shouldUseTemplates options =
         options.PieceReader = Some "template"
@@ -172,28 +194,42 @@ module Program =
         |> Option.defaultValue status
 
     [<ExcludeFromCodeCoverage>]
-    let private runOverlay options boardGeometry =
+    let private runOverlay options (initialGeometry: BoardGeometry option) =
         use overlay = new OverlayWindow()
         let environmentFen = Environment.GetEnvironmentVariable "CHESS_OVERLAY_FEN"
 
-        let calibrationWarning = calibrateTemplates options environmentFen boardGeometry
+        let calibrationWarning =
+            initialGeometry |> Option.bind (calibrateTemplates options environmentFen)
 
-        let reader, warning =
-            createReader
-                options
-                environmentFen
+        let reader, warning = createReader options environmentFen
 
-        let warning =
+        let mergedWarning =
             match calibrationWarning, warning with
             | Some calibration, Some readerWarning -> Some(calibration + " - " + readerWarning)
             | Some calibration, None -> Some calibration
             | None, Some readerWarning -> Some readerWarning
             | None, None -> None
 
-        use controller = new OverlayController(boardGeometry, reader, overlay, timingEnabled = options.TimingEnabled)
+        use controller = new OverlayController(initialGeometry, reader, overlay, timingEnabled = options.TimingEnabled)
+
         overlay.Load.Add(fun _ ->
-            overlay.ShowStatus(statusWithWarning (startupStatus options) warning)
+            let statusMsg =
+                match initialGeometry with
+                | Some _ -> statusWithWarning (startupStatus options) mergedWarning
+                | None -> "Press Ctrl+Shift+B to select the board area"
+
+            overlay.ShowStatus(statusMsg)
             controller.Start())
+
+        overlay.SelectBoardRequested.Add(fun () ->
+            use selector = new BoardSelectionWindow()
+
+            if selector.ShowDialog() = DialogResult.OK then
+                match selector.SelectedGeometry with
+                | Some geometry ->
+                    BoardGeometryStorage.save geometry
+                    controller.UpdateGeometry(geometry)
+                | None -> ())
 
         Application.Run overlay
         0
@@ -206,7 +242,5 @@ module Program =
         Application.SetCompatibleTextRenderingDefault false
 
         let options = parseStartupOptions args
-
-        tryGetBoardGeometry options selectBoardGeometry
-        |> Option.map (runOverlay options)
-        |> Option.defaultValue 1
+        let initialGeometry = tryGetBoardGeometry options BoardGeometryStorage.tryLoad
+        runOverlay options initialGeometry

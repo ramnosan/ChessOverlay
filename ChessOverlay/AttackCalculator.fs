@@ -114,3 +114,20 @@ module AttackCalculator =
         match enemyColor board with
         | Some color -> attackedSquaresByColor board color
         | None -> Set.empty
+
+    let enemyAttackArrows (board: BoardState) : (Square * Square) list =
+        match enemyColor board with
+        | None -> []
+        | Some color ->
+            board
+            |> Map.toSeq
+            |> Seq.choose (fun (square, piece) ->
+                if piece.Color = color then
+                    attacksForPiece board square piece
+                    |> Set.toSeq
+                    |> Seq.map (fun target -> square, target)
+                    |> Some
+                else
+                    None)
+            |> Seq.concat
+            |> Seq.toList

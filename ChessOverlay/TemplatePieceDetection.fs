@@ -158,6 +158,44 @@ module BackgroundIsolation =
             finally
                 bitmap.UnlockBits(data)
 
+    let private enqueueIfBackground
+        (x: int)
+        (y: int)
+        (w: int)
+        (isBackground: int -> int -> bool)
+        (visited: bool[])
+        (queue: System.Collections.Generic.Queue<struct (int * int)>)
+        =
+        let p = y * w + x
+        if not visited[p] && isBackground x y then
+            visited[p] <- true
+            queue.Enqueue(struct (x, y))
+
+    let private seedBorderQueue (w: int) (h: int) (enqueue: int -> int -> unit) =
+        for x in 0 .. w - 1 do
+            enqueue x 0
+            enqueue x (h - 1)
+        for y in 1 .. h - 2 do
+            enqueue 0 y
+            enqueue (w - 1) y
+
+    let private floodFill
+        (w: int)
+        (h: int)
+        (isBackground: int -> int -> bool)
+        (visited: bool[])
+        (queue: System.Collections.Generic.Queue<struct (int * int)>)
+        =
+        let tryVisit x y =
+            if x >= 0 && x < w && y >= 0 && y < h then
+                enqueueIfBackground x y w isBackground visited queue
+        while queue.Count > 0 do
+            let struct (x, y) = queue.Dequeue()
+            tryVisit (x - 1) y
+            tryVisit (x + 1) y
+            tryVisit x (y - 1)
+            tryVisit x (y + 1)
+
     let isolate (bitmap: Bitmap) : Bitmap =
         let w = bitmap.Width
         let h = bitmap.Height
@@ -178,41 +216,13 @@ module BackgroundIsolation =
 
             let isBackground x y =
                 let o = offsetOf x y
-                let b = float bytes[o]
-                let gr = float bytes[o + 1]
-                let r = float bytes[o + 2]
-                luminance r gr b >= darkThreshold
+                luminance (float bytes[o + 2]) (float bytes[o + 1]) (float bytes[o]) >= darkThreshold
 
             let visited = Array.zeroCreate<bool> (w * h)
             let queue = System.Collections.Generic.Queue<struct (int * int)>()
 
-            let trySeed x y =
-                let p = y * w + x
-                if not visited[p] && isBackground x y then
-                    visited[p] <- true
-                    queue.Enqueue(struct (x, y))
-
-            for x in 0 .. w - 1 do
-                trySeed x 0
-                trySeed x (h - 1)
-
-            for y in 1 .. h - 2 do
-                trySeed 0 y
-                trySeed (w - 1) y
-
-            let tryVisit x y =
-                if x >= 0 && x < w && y >= 0 && y < h then
-                    let p = y * w + x
-                    if not visited[p] && isBackground x y then
-                        visited[p] <- true
-                        queue.Enqueue(struct (x, y))
-
-            while queue.Count > 0 do
-                let struct (x, y) = queue.Dequeue()
-                tryVisit (x - 1) y
-                tryVisit (x + 1) y
-                tryVisit x (y - 1)
-                tryVisit x (y + 1)
+            seedBorderQueue w h (fun x y -> enqueueIfBackground x y w isBackground visited queue)
+            floodFill w h isBackground visited queue
 
             for y in 0 .. h - 1 do
                 for x in 0 .. w - 1 do

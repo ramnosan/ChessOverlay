@@ -10,13 +10,15 @@ type OverlayWindow() as this =
     inherit Form()
 
     let transparentColor = Color.Magenta
-    let highlightColor = Color.Red
+    let arrowColor = Color.FromArgb(255, 220, 40, 40)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
     let mutable frame: OverlayFrame option = None
-    let mutable statusText = "Select a chessboard to start..."
+    let mutable statusText = "Press Ctrl+Shift+B to select the board area"
     let virtualBounds = SystemInformation.VirtualScreen
+    let hotkeyId = 1
+    let selectBoardRequested = Event<unit>()
 
     do
         this.FormBorderStyle <- FormBorderStyle.None
@@ -42,10 +44,20 @@ type OverlayWindow() as this =
         |> ignore
 
         NativeMethods.tryExcludeFromCapture this.Handle
+        NativeMethods.registerHotKey this.Handle hotkeyId 0x0006u 0x42u |> ignore
+        this.FormClosed.Add(fun _ -> NativeMethods.unregisterHotKey this.Handle hotkeyId |> ignore)
+
+    member _.SelectBoardRequested = selectBoardRequested.Publish
+
+    override _.WndProc(m: byref<Message>) =
+        if m.Msg = 0x0312 && m.WParam.ToInt32() = hotkeyId then
+            selectBoardRequested.Trigger()
+        base.WndProc(&m)
 
     member _.ShowFrame(nextFrame: OverlayFrame) =
         frame <- Some nextFrame
-        statusText <- sprintf "Board selected - %i attacked squares" nextFrame.HighlightedSquares.Count
+        let attackedCount = nextFrame.AttackArrows |> List.map snd |> List.distinct |> List.length
+        statusText <- sprintf "Board selected - %i attacked squares" attackedCount
         this.Invalidate()
 
     member _.ShowStatus(message: string) =
@@ -57,7 +69,7 @@ type OverlayWindow() as this =
             Some
                 {
                     Geometry = geometry
-                    HighlightedSquares = Set.empty
+                    AttackArrows = []
                     DetectedPieces = None
                 }
 
@@ -72,12 +84,17 @@ type OverlayWindow() as this =
         match frame with
         | None -> this.PaintStatus args.Graphics
         | Some current ->
-            use brush = new SolidBrush(highlightColor)
+            let penWidth = single current.Geometry.SquareSize * 0.09f
+            use arrowPen = new Pen(arrowColor, penWidth)
+            arrowPen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(4.0f, 4.0f)
             use outlinePen = new Pen(outlineColor, 3.0f)
 
-            for square in current.HighlightedSquares do
-                let rect: RectangleF = this.ToClientRectangle(current.Geometry.GetSquareRectangle square)
-                args.Graphics.FillRectangle(brush, rect)
+            for (fromSq, toSq) in current.AttackArrows do
+                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
 
             let boardRect =
                 RectangleF(
@@ -190,12 +207,20 @@ and [<ExcludeFromCodeCoverage>] private NativeMethods =
     [<System.Runtime.InteropServices.DllImport("user32.dll")>]
     static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint32 dwAffinity)
 
+    [<System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "RegisterHotKey")>]
+    static extern bool RegisterHotKey(IntPtr hWnd, int id, uint32 fsModifiers, uint32 vk)
+
+    [<System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "UnregisterHotKey")>]
+    static extern bool UnregisterHotKey(IntPtr hWnd, int id)
+
     static member GWL_EXSTYLE = GWL_EXSTYLE_VALUE
     static member WS_EX_LAYERED = WS_EX_LAYERED_VALUE
     static member WS_EX_TRANSPARENT = WS_EX_TRANSPARENT_VALUE
     static member WS_EX_TOOLWINDOW = WS_EX_TOOLWINDOW_VALUE
     static member getWindowLong handle index = GetWindowLong(handle, index)
     static member setWindowLong handle index value = SetWindowLong(handle, index, value)
+    static member registerHotKey handle id modifiers vk = RegisterHotKey(handle, id, modifiers, vk)
+    static member unregisterHotKey handle id = UnregisterHotKey(handle, id)
     static member tryExcludeFromCapture handle =
         try
             SetWindowDisplayAffinity(handle, WDA_EXCLUDEFROMCAPTURE_VALUE) |> ignore

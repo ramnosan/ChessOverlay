@@ -9,7 +9,7 @@ open System.Windows.Forms
 
 [<ExcludeFromCodeCoverage>]
 type OverlayController(
-    boardGeometry: BoardGeometry,
+    initialGeometry: BoardGeometry option,
     reader: IBoardReader,
     overlay: OverlayWindow,
     ?timingEnabled: bool,
@@ -21,6 +21,7 @@ type OverlayController(
     let timer = new Timer(Interval = scanInterval)
     let scanGate = obj ()
     let mutable scanInProgress = false
+    let mutable boardGeometry = initialGeometry
 
     let toVirtualScreenGeometry (origin: Point) (geometry: BoardGeometry) =
         {
@@ -83,36 +84,39 @@ type OverlayController(
             |> fun summary -> Debug.WriteLine("Piece candidates: " + summary)
 
     let scanOnce () =
-        try
-            let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
-            use capture = capturedBitmap
+        match boardGeometry with
+        | None -> lock scanGate (fun () -> scanInProgress <- false)
+        | Some geometry ->
+            try
+                let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
+                use capture = capturedBitmap
 
-            let screenGeometry = toVirtualScreenGeometry origin boardGeometry
+                let screenGeometry = toVirtualScreenGeometry origin geometry
 
-            let reading = measure "piece-reading" (fun () -> reader.Read(capture, boardGeometry))
-            reading |> Option.iter logCandidates
+                let reading = measure "piece-reading" (fun () -> reader.Read(capture, geometry))
+                reading |> Option.iter logCandidates
 
-            match reading with
-            | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
-                let attackedSquares = AttackCalculator.enemyAttackedSquares boardReading.Board
+                match reading with
+                | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
+                    let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
 
-                measure
-                    "overlay-update"
-                    (fun () ->
-                        updateOverlay
-                            (fun () ->
-                                overlay.ShowFrame
-                                    {
-                                        Geometry = screenGeometry
-                                        HighlightedSquares = attackedSquares
-                                        DetectedPieces = Some boardReading.Board
-                                    }))
-            | _ ->
-                let status = uncertainStatus reading
-                measure "overlay-update" (fun () -> updateOverlay (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
-        finally
-            lock scanGate (fun () ->
-                scanInProgress <- false)
+                    measure
+                        "overlay-update"
+                        (fun () ->
+                            updateOverlay
+                                (fun () ->
+                                    overlay.ShowFrame
+                                        {
+                                            Geometry = screenGeometry
+                                            AttackArrows = attackArrows
+                                            DetectedPieces = Some boardReading.Board
+                                        }))
+                | _ ->
+                    let status = uncertainStatus reading
+                    measure "overlay-update" (fun () -> updateOverlay (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
+            finally
+                lock scanGate (fun () ->
+                    scanInProgress <- false)
 
     let startScan () =
         let shouldStart =
@@ -130,7 +134,16 @@ type OverlayController(
         timer.Tick.Add(fun _ -> startScan ())
 
     member _.Start() =
-        timer.Start()
+        if boardGeometry.IsSome then
+            timer.Start()
+            startScan ()
+
+    member _.UpdateGeometry(geometry: BoardGeometry) =
+        boardGeometry <- Some geometry
+
+        if not timer.Enabled then
+            timer.Start()
+
         startScan ()
 
     member _.Stop() = timer.Stop()
