@@ -275,36 +275,45 @@ module AttackCalculator =
         | Some king ->
             not (Set.contains king (attackedSquaresByColorWithDir movedBoard enemy 1))
 
+    let private givesCheckAfterMove movedBoard toSquare piece enemy =
+        match kingSquare movedBoard enemy with
+        | None -> false
+        | Some enemyKing -> Set.contains enemyKing (attacksForPieceWithDir movedBoard toSquare piece -1)
+
+    let private enemyKingSafeAfterCapture boardAfterCapture enemy friendly =
+        match kingSquare boardAfterCapture enemy with
+        | None -> true
+        | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture friendly -1))
+
+    let private forcingCheckPreventsCapture givesCheck attacker piece =
+        givesCheck && attacker.Kind <> King && piece.Kind <> Queen
+
+    let private legalCaptureWinsForkingPiece movedBoard toSquare piece friendly enemy givesCheck friendlyDefendsForkingPiece (attackerSquare, attacker) =
+        if forcingCheckPreventsCapture givesCheck attacker piece then
+            false
+        else
+            let boardAfterCapture =
+                movedBoard
+                |> Map.remove attackerSquare
+                |> Map.add toSquare attacker
+
+            enemyKingSafeAfterCapture boardAfterCapture enemy friendly
+            && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
+
     let private forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
-        let givesCheck =
-            match kingSquare movedBoard enemy with
-            | None -> false
-            | Some enemyKing -> Set.contains enemyKing (attacksForPieceWithDir movedBoard toSquare piece -1)
-
-        let friendlyDefendsForkingPiece =
-            defendedAgainstAttackers movedBoard friendly -1 enemy 1 toSquare
-
-        let legalCaptureWinsForkingPiece (attackerSquare, attacker) =
-            if givesCheck && attacker.Kind <> King && piece.Kind <> Queen then
-                false
-            else
-                let boardAfterCapture =
-                    movedBoard
-                    |> Map.remove attackerSquare
-                    |> Map.add toSquare attacker
-
-                let leavesEnemyKingSafe =
-                    match kingSquare boardAfterCapture enemy with
-                    | None -> true
-                    | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture friendly -1))
-
-                leavesEnemyKingSafe
-                && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
-
         piecesAttackingSquare movedBoard enemy 1 toSquare
-        |> Seq.exists legalCaptureWinsForkingPiece
+        |> Seq.exists (
+            legalCaptureWinsForkingPiece
+                movedBoard
+                toSquare
+                piece
+                friendly
+                enemy
+                (givesCheckAfterMove movedBoard toSquare piece enemy)
+                (defendedAgainstAttackers movedBoard friendly -1 enemy 1 toSquare)
+        )
         |> not
 
     let private forkedVulnerableTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
@@ -375,28 +384,36 @@ module AttackCalculator =
     // result pairs the forking square with the undefended friendly squares it
     // hits. Sliding pieces "attack" the piece on a ray because attacksForPiece
     // includes the blocker square.
+    let private undefendedSquaresFor board targetColor defenderPawnRankDelta =
+        let defended = attackedSquaresByColorWithDir board targetColor defenderPawnRankDelta
+
+        board
+        |> Map.toSeq
+        |> Seq.choose (fun (square, piece) ->
+            if piece.Color = targetColor && not (Set.contains square defended) then
+                Some square
+            else
+                None)
+        |> Set.ofSeq
+
+    let private forkedTargets board undefendedTargets square piece =
+        Set.intersect (attacksForPiece board square piece) undefendedTargets
+
+    let private forkForPiece board undefendedTargets square piece =
+        let forked = forkedTargets board undefendedTargets square piece
+        if Set.count forked >= 2 then Some(square, forked) else None
+
+    let private enemyForksForColor board enemy =
+        let friendly = oppositeColor enemy
+        let undefendedFriendly = undefendedSquaresFor board friendly -1
+
+        board
+        |> Map.toSeq
+        |> Seq.filter (fun (_, piece) -> piece.Color = enemy)
+        |> Seq.choose (fun (square, piece) -> forkForPiece board undefendedFriendly square piece)
+        |> Seq.toList
+
     let enemyForks (board: BoardState) : (Square * Set<Square>) list =
-        match enemyColor board with
-        | None -> []
-        | Some enemy ->
-            let friendly = if enemy = White then Black else White
-            let defended = attackedSquaresByColorWithDir board friendly -1
-
-            let undefendedFriendly =
-                board
-                |> Map.toSeq
-                |> Seq.choose (fun (square, piece) ->
-                    if piece.Color = friendly && not (Set.contains square defended) then
-                        Some square
-                    else
-                        None)
-                |> Set.ofSeq
-
-            board
-            |> Map.toSeq
-            |> Seq.filter (fun (_, piece) -> piece.Color = enemy)
-            |> Seq.choose (fun (square, piece) ->
-                let forked = Set.intersect (attacksForPiece board square piece) undefendedFriendly
-
-                if Set.count forked >= 2 then Some(square, forked) else None)
-            |> Seq.toList
+        enemyColor board
+        |> Option.map (enemyForksForColor board)
+        |> Option.defaultValue []

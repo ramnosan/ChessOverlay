@@ -172,8 +172,8 @@ module CrapMetric =
         |> List.mapi (fun index (startLine, startIndent, name) ->
             let endLine =
                 let nextFunction =
-                    includedStarts
-                    |> List.skip (index + 1)
+                    starts
+                    |> List.filter (fun (lineNumber, _, _) -> lineNumber > startLine)
                     |> List.tryFind (fun (_, indent, _) -> indent <= startIndent)
                     |> Option.map (fun (lineNumber, _, _) -> lineNumber)
 

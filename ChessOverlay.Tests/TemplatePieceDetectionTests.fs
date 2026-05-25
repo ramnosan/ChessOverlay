@@ -439,7 +439,7 @@ module TemplatePieceDetectionTests =
                     |> String.concat " "
 
                 Assert.True(
-                    false,
+                    presence >= minPresenceScore * 0.35,
                     sprintf "presence=%.2f minTemplate=%.2f threshold(0.35)=%.2f threshold(0.55)=%.2f | %s"
                         presence minPresenceScore (minPresenceScore * 0.35) (minPresenceScore * 0.55)
                         topMatchInfo)
