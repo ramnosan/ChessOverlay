@@ -4,8 +4,8 @@ open System
 open System.Drawing
 
 type PieceColor =
-    | Top
-    | Bottom
+    | White
+    | Black
 
 type PieceKind =
     | Pawn
@@ -117,9 +117,9 @@ module Fen =
     let private pieceFromChar value =
         let color =
             if Char.IsUpper value then
-                Bottom
+                White
             else
-                Top
+                Black
 
         let kind = Map.tryFind (Char.ToLowerInvariant value) pieceKinds
 

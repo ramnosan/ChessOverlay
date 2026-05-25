@@ -39,7 +39,7 @@ module TemplatePieceDetectionTests =
             | Knight -> "N"
             | Pawn -> "P"
 
-        if piece.Color = Top then letter.ToLowerInvariant() else letter
+        if piece.Color = Black then letter.ToLowerInvariant() else letter
 
     let private candidateSummary (reading: BoardReading) (expected: BoardState) =
         expected
@@ -135,15 +135,15 @@ module TemplatePieceDetectionTests =
 
         try
             Assert.Equal(2, templates.Count)
-            Assert.True(templates.ContainsKey { Color = Bottom; Kind = King })
-            Assert.True(templates.ContainsKey { Color = Top; Kind = Queen })
+            Assert.True(templates.ContainsKey { Color = White; Kind = King })
+            Assert.True(templates.ContainsKey { Color = Black; Kind = Queen })
         finally
             disposeTemplates templates
 
     [<Fact>]
     let ``Template reader matches a single real piece square`` () =
         let pieceImages = loadPieceImages ()
-        let piece = { Color = Bottom; Kind = King }
+        let piece = { Color = White; Kind = King }
 
         try
             // White king alone on a1.
@@ -165,7 +165,7 @@ module TemplatePieceDetectionTests =
     [<Fact>]
     let ``Detection ignores the square background colour`` () =
         let pieceImages = loadPieceImages ()
-        let piece = { Color = Bottom; Kind = Knight }
+        let piece = { Color = White; Kind = Knight }
 
         try
             let knight = pieceImages[piece]
@@ -199,8 +199,8 @@ module TemplatePieceDetectionTests =
 
     [<Fact>]
     let ``Template matcher accepts lower-scoring pawns before other pieces`` () =
-        let pawn = { Color = Bottom; Kind = Pawn }
-        let knight = { Color = Bottom; Kind = Knight }
+        let pawn = { Color = White; Kind = Pawn }
+        let knight = { Color = White; Kind = Knight }
 
         Assert.Equal(Some pawn, SimilarityComparison.tryAcceptBestMatch 0.9 [ pawn, 0.78 ])
         Assert.True(SimilarityComparison.tryAcceptBestMatch 0.9 [ knight, 0.78 ] |> Option.isNone)
@@ -226,7 +226,7 @@ module TemplatePieceDetectionTests =
 
         try
             Assert.Equal(2, templates.Length)
-            Assert.All(templates, fun (piece, _) -> Assert.Equal({ Color = Bottom; Kind = Pawn }, piece))
+            Assert.All(templates, fun (piece, _) -> Assert.Equal({ Color = White; Kind = Pawn }, piece))
         finally
             disposeAllTemplates templates
 

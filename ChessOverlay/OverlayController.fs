@@ -53,8 +53,8 @@ type OverlayController(
     let candidateNotation piece =
         let color =
             match piece.Color with
-            | Top -> "b"
-            | Bottom -> "w"
+            | Black -> "b"
+            | White -> "w"
 
         let kind =
             match piece.Kind with

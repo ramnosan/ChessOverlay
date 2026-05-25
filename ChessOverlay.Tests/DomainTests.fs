@@ -17,8 +17,8 @@ module DomainTests =
             | Ok value -> value
             | Error message -> failwith message
 
-        Assert.Equal(Some { Color = Top; Kind = Pawn }, BoardState.tryPieceAt { File = 3; Rank = 2 } board)
-        Assert.Equal(Some { Color = Bottom; Kind = Knight }, BoardState.tryPieceAt { File = 3; Rank = 6 } board)
+        Assert.Equal(Some { Color = Black; Kind = Pawn }, BoardState.tryPieceAt { File = 3; Rank = 2 } board)
+        Assert.Equal(Some { Color = White; Kind = Knight }, BoardState.tryPieceAt { File = 3; Rank = 6 } board)
 
     [<Fact>]
     let ``Square names use chess coordinates from white perspective`` () =
@@ -39,7 +39,7 @@ module DomainTests =
     [<Fact>]
     let ``Board state helpers report occupancy`` () =
         let square = { File = 4; Rank = 4 }
-        let piece = { Color = Bottom; Kind = King }
+        let piece = { Color = White; Kind = King }
         let board = BoardState.empty |> Map.add square piece
 
         Assert.Equal(Some piece, BoardState.tryPieceAt square board)

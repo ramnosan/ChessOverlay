@@ -10,10 +10,10 @@ open System.Runtime.InteropServices
 module PieceTemplates =
     let private colors =
         [|
-            "white", Bottom
-            "black", Top
-            "w", Bottom
-            "b", Top
+            "white", White
+            "black", Black
+            "w", White
+            "b", Black
         |]
         |> Map.ofArray
 
@@ -90,8 +90,8 @@ module PieceTemplateCalibration =
 
     let private colorName piece =
         match piece.Color with
-        | Top -> "black"
-        | Bottom -> "white"
+        | Black -> "black"
+        | White -> "white"
 
     let private kindName piece =
         match piece.Kind with

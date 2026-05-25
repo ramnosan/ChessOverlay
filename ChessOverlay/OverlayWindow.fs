@@ -109,7 +109,7 @@ type OverlayWindow() as this =
             | Knight -> "N"
             | Pawn -> "P"
 
-        if piece.Color = Top then letter.ToLowerInvariant() else letter
+        if piece.Color = Black then letter.ToLowerInvariant() else letter
 
     member private this.PaintPieceLabels(graphics: Graphics, geometry: BoardGeometry, pieces: BoardState) =
         let fontSize = single geometry.SquareSize * 0.38f
@@ -123,7 +123,7 @@ type OverlayWindow() as this =
             let ty = rect.Y + (rect.Height - textSize.Height) / 2.0f
 
             let textColor, shadowColor =
-                if piece.Color = Bottom then
+                if piece.Color = White then
                     Color.FromArgb(240, 255, 255, 255), Color.FromArgb(200, 20, 20, 20)
                 else
                     Color.FromArgb(240, 24, 24, 24), Color.FromArgb(200, 240, 240, 240)

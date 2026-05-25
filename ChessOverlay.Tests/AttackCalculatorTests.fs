@@ -27,11 +27,31 @@ module AttackCalculatorTests =
         Assert.DoesNotContain({ File = 3; Rank = 5 }, attacks)
 
     [<Fact>]
-    let ``Bottom pieces are ignored when calculating enemy attacks`` () =
-        let board = parse "8/8/8/8/3N4/8/8/8 w - - 0 1"
+    let ``Bottom player's pieces are ignored when calculating enemy attacks`` () =
+        // Black sits on top (enemy); white is the bottom player.
+        let board = parse "n7/8/8/8/3N4/8/8/8 w - - 0 1"
         let attacks = AttackCalculator.enemyAttackedSquares board
 
-        Assert.Empty(attacks)
+        Assert.Contains({ File = 1; Rank = 2 }, attacks)
+        Assert.Contains({ File = 2; Rank = 1 }, attacks)
+        Assert.DoesNotContain({ File = 2; Rank = 2 }, attacks)
+        Assert.DoesNotContain({ File = 4; Rank = 6 }, attacks)
+
+    [<Fact>]
+    let ``A white enemy on top is highlighted when the user plays black`` () =
+        // User is black: white sits on the top ranks, black on the bottom.
+        let board = parse "3N4/8/8/8/8/8/8/7n w - - 0 1"
+        let attacks = AttackCalculator.enemyAttackedSquares board
+
+        Assert.Contains({ File = 2; Rank = 2 }, attacks)
+        Assert.Contains({ File = 4; Rank = 2 }, attacks)
+        Assert.DoesNotContain({ File = 6; Rank = 5 }, attacks)
+
+    [<Fact>]
+    let ``enemyColor picks the colour sitting on top`` () =
+        Assert.Equal(Some White, AttackCalculator.enemyColor (parse "3N4/8/8/8/8/8/8/7n w - - 0 1"))
+        Assert.Equal(Some Black, AttackCalculator.enemyColor (parse "n7/8/8/8/3N4/8/8/8 w - - 0 1"))
+        Assert.Equal(None, AttackCalculator.enemyColor (parse "8/8/8/8/8/8/8/8 w - - 0 1"))
 
     [<Fact>]
     let ``Knight attacks stay inside the board`` () =

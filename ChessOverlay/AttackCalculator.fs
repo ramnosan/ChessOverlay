@@ -20,6 +20,9 @@ module AttackCalculator =
 
         loop (square.File + fileDelta) (square.Rank + rankDelta) Set.empty
 
+    // Only the enemy (top) player's attacks are ever highlighted, and the top
+    // player moves down the screen regardless of colour, so pawns always attack
+    // toward increasing ranks here.
     let private pawnAttacks square =
         Set.empty
         |> addIfValid (square.File - 1) (square.Rank + 1)
@@ -72,11 +75,11 @@ module AttackCalculator =
         |> Map.find piece.Kind
         <| square
 
-    let enemyAttackedSquares (board: BoardState) =
+    let attackedSquaresByColor (board: BoardState) color =
         board
         |> Map.toSeq
         |> Seq.choose (fun (square, piece) ->
-            if piece.Color = Top then
+            if piece.Color = color then
                 Some(attacksForPiece board square piece)
             else
                 None)
@@ -85,3 +88,29 @@ module AttackCalculator =
                 Set.empty
             else
                 Set.unionMany attacks
+
+    let private meanRank color (board: BoardState) =
+        let ranks =
+            board
+            |> Map.toSeq
+            |> Seq.choose (fun (square, piece) -> if piece.Color = color then Some(float square.Rank) else None)
+            |> Seq.toList
+
+        match ranks with
+        | [] -> None
+        | _ -> Some(List.average ranks)
+
+    // The top player is always the enemy, but they may be either colour (the
+    // user plays both sides). Rank 0 is the top of the screen, so the colour
+    // whose pieces sit at the lower mean rank is the side on top.
+    let enemyColor (board: BoardState) : PieceColor option =
+        match meanRank White board, meanRank Black board with
+        | Some white, Some black -> Some(if white <= black then White else Black)
+        | Some _, None -> Some White
+        | None, Some _ -> Some Black
+        | None, None -> None
+
+    let enemyAttackedSquares (board: BoardState) =
+        match enemyColor board with
+        | Some color -> attackedSquaresByColor board color
+        | None -> Set.empty
