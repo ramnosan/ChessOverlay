@@ -11,6 +11,7 @@
     <Compile Include="TestHelpers.fs" />
     <Compile Include="DomainTests.fs" />
     <Compile Include="AttackCalculatorTests.fs" />
+    <Compile Include="AttackCalculatorPropertyTests.fs" />
     <Compile Include="BoardReaderTests.fs" />
     <Compile Include="TemplatePieceDetectionTests.fs" />
     <Compile Include="QualityTools\CrapMetricTests.fs" />
@@ -35,6 +36,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="FsCheck" Version="3.1.0" />
   </ItemGroup>
 
   <ItemGroup>

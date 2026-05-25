@@ -60,7 +60,7 @@ module AttackCalculator =
         |> List.map (fun (fileDelta, rankDelta) -> rayLine board square fileDelta rankDelta)
         |> List.filter (not << List.isEmpty)
 
-    let private attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
+    let attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
         match piece.Kind with
         | Pawn -> pawnRaysWithDir pawnRankDelta square
         | Knight -> knightRays square
@@ -72,7 +72,7 @@ module AttackCalculator =
     let attackRaysForPiece board square piece : Square list list =
         attackRaysForPieceWithDir board square piece 1
 
-    let private attacksForPieceWithDir board square piece pawnRankDelta =
+    let attacksForPieceWithDir board square piece pawnRankDelta =
         attackRaysForPieceWithDir board square piece pawnRankDelta
         |> List.concat
         |> Set.ofList
@@ -80,7 +80,7 @@ module AttackCalculator =
     let attacksForPiece board square piece =
         attacksForPieceWithDir board square piece 1
 
-    let private attackedSquaresByColorWithDir (board: BoardState) color pawnRankDelta =
+    let attackedSquaresByColorWithDir (board: BoardState) color pawnRankDelta =
         board
         |> Map.toSeq
         |> Seq.choose (fun (square, piece) ->

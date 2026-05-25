@@ -14,6 +14,8 @@
     <Compile Include="OverlayWindow.fs" />
     <Compile Include="OverlayController.fs" />
     <Compile Include="BoardSelectionWindow.fs" />
+    <Compile Include="ChromeBoardDetector.fs" />
+    <Compile Include="ChromeBoardSelectionDialog.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -25,6 +27,12 @@
     <Content Include="FieldTemplates\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ChessOverlay.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

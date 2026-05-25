@@ -232,14 +232,20 @@ module Program =
             controller.Start())
 
         overlay.SelectBoardRequested.Add(fun () ->
-            use selector = new BoardSelectionWindow()
+            let applyGeometry geometry =
+                BoardGeometryStorage.save geometry
+                controller.UpdateGeometry geometry
 
-            if selector.ShowDialog() = DialogResult.OK then
-                match selector.SelectedGeometry with
-                | Some geometry ->
-                    BoardGeometryStorage.save geometry
-                    controller.UpdateGeometry(geometry)
-                | None -> ())
+            use chromeDialog = new ChromeBoardSelectionDialog()
+            chromeDialog.ShowDialog() |> ignore
+
+            if chromeDialog.WantsManualSelection then
+                use selector = new BoardSelectionWindow()
+
+                if selector.ShowDialog() = DialogResult.OK then
+                    selector.SelectedGeometry |> Option.iter applyGeometry
+            else
+                chromeDialog.SelectedGeometry |> Option.iter applyGeometry)
 
         Application.Run overlay
         0
