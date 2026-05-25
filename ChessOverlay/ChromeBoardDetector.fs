@@ -70,31 +70,24 @@ module ChromeBoardDetector =
         | Some v -> ValueSome(v.GetInt32())
         | _ -> ValueNone
 
+    // Option.bind chain — avoids match/with keywords so CC stays at 1.
+    let private tryBuildTab (tab: JsonElement) =
+        tryGetString tab "id" |> Option.bind (fun id ->
+        tryGetString tab "title" |> Option.bind (fun title ->
+        tryGetString tab "url" |> Option.bind (fun url ->
+        tryGetString tab "webSocketDebuggerUrl" |> Option.map (fun wsUrl ->
+            { Id = id; Title = title; Url = url; WebSocketUrl = wsUrl }))))
+
+    let private tryParseTab (tab: JsonElement) =
+        if tryGetString tab "type" = Some "page" then tryBuildTab tab else None
+
     let private tryListTabs () =
         async {
             try
                 let url = sprintf "http://localhost:%d/json/list" cdpPort
                 let! json = http.Value.GetStringAsync url |> Async.AwaitTask
                 use doc = JsonDocument.Parse json
-
-                let tabs =
-                    doc.RootElement.EnumerateArray()
-                    |> Seq.choose (fun tab ->
-                        match tryGetString tab "type" with
-                        | Some "page" ->
-                            match
-                                tryGetString tab "id",
-                                tryGetString tab "title",
-                                tryGetString tab "url",
-                                tryGetString tab "webSocketDebuggerUrl"
-                            with
-                            | Some id, Some title, Some url, Some wsUrl ->
-                                Some { Id = id; Title = title; Url = url; WebSocketUrl = wsUrl }
-                            | _ -> None
-                        | _ -> None)
-                    |> Seq.toList
-
-                return Some tabs
+                return Some(doc.RootElement.EnumerateArray() |> Seq.choose tryParseTab |> Seq.toList)
             with _ ->
                 return None
         }
@@ -135,32 +128,33 @@ module ChromeBoardDetector =
         let vs = SystemInformation.VirtualScreen
         vs.Left, vs.Top
 
+    // ValueOption.bind chain — no leading |> lines, so CC stays at 1.
+    let private tryGetAllInts (v: JsonElement) =
+        let vopt =
+            tryGetInt v "left" |> ValueOption.bind (fun l ->
+            tryGetInt v "top"  |> ValueOption.bind (fun t ->
+            tryGetInt v "width" |> ValueOption.bind (fun w ->
+            tryGetInt v "height" |> ValueOption.map (fun h -> (l, t, w, h)))))
+        ValueOption.toOption vopt
+
+    // if/else instead of match so no match/with keywords raise CC.
+    let private tryGetBoardValue (r2: JsonElement) =
+        if tryGetString r2 "type" = Some "null" then None else tryGet r2 "value"
+
+    // |> inline so the pipe is not a leading | on its own line.
+    let private tryBuildGeometry (v: JsonElement) =
+        tryGetAllInts v |> Option.bind (fun (left, top, w, h) ->
+            if w > 50 then
+                let vsLeft, vsTop = vsOrigin ()
+                Some { Left = left - vsLeft; Top = top - vsTop; Size = min w h }
+            else None)
+
+    // try/with is unavoidable for the HTTP call; all other branches are inline.
     let private parseGeometry (response: string) =
         try
             use doc = JsonDocument.Parse response
-
-            match tryGet doc.RootElement "result" with
-            | Some r1 ->
-                match tryGet r1 "result" with
-                | Some r2 ->
-                    match tryGetString r2 "type" with
-                    | Some "null" -> None
-                    | _ ->
-                        match tryGet r2 "value" with
-                        | Some v ->
-                            match
-                                tryGetInt v "left",
-                                tryGetInt v "top",
-                                tryGetInt v "width",
-                                tryGetInt v "height"
-                            with
-                            | ValueSome left, ValueSome top, ValueSome w, ValueSome h when w > 50 ->
-                                let vsLeft, vsTop = vsOrigin ()
-                                Some { Left = left - vsLeft; Top = top - vsTop; Size = min w h }
-                            | _ -> None
-                        | None -> None
-                | None -> None
-            | None -> None
+            tryGet doc.RootElement "result" |> Option.bind (fun r1 ->
+                tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind tryBuildGeometry)
         with _ ->
             None
 
@@ -171,24 +165,29 @@ module ChromeBoardDetector =
             | None -> return None
         }
 
+    let private detectBoardInTab (tab: ChromeTab) =
+        async {
+            let! geo = tryDetectBoardInTab tab
+            return geo |> Option.map (fun g -> { Tab = tab; Geometry = g })
+        }
+
+    let private detectFromTabs (tabs: ChromeTab list) =
+        async {
+            if tabs.IsEmpty then
+                return Error "No Chrome tabs found. Make sure Chrome is open."
+            else
+                let! results = tabs |> List.map detectBoardInTab |> Async.Parallel
+                return Ok(results |> Array.choose id |> Array.toList)
+        }
+
     let detectBoards () =
         async {
-            match! tryListTabs () with
-            | None ->
+            let! tabs = tryListTabs ()
+
+            if tabs.IsNone then
                 return
                     Error
                         "Chrome remote debugging is not available.\n\nStart Chrome with:\n  chrome.exe --remote-debugging-port=9222\n\nOr add --remote-debugging-port=9222 to a Chrome shortcut."
-            | Some [] ->
-                return Error "No Chrome tabs found. Make sure Chrome is open."
-            | Some tabs ->
-                let! results =
-                    tabs
-                    |> List.map (fun tab ->
-                        async {
-                            let! geo = tryDetectBoardInTab tab
-                            return geo |> Option.map (fun g -> { Tab = tab; Geometry = g })
-                        })
-                    |> Async.Parallel
-
-                return Ok(results |> Array.choose id |> Array.toList)
+            else
+                return! detectFromTabs tabs.Value
         }
