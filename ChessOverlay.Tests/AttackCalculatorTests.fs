@@ -117,3 +117,111 @@ module AttackCalculatorTests =
         let arrows = AttackCalculator.enemyAttackArrows board
         Assert.Equal(2, arrows.Length)
         Assert.All(arrows, fun (src, _) -> Assert.Equal({ File = 0; Rank = 0 }, src))
+
+    [<Fact>]
+    let ``enemyForks reports a knight attacking two friendly pieces`` () =
+        // Black knight on d7 (file=3, rank=1) sits on top (enemy); two white
+        // rooks on c5/e5 (rank=3) are both knight-attacked from there.
+        let board = parse "8/3n4/8/2R1R3/8/8/8/8 w - - 0 1"
+        let forks = AttackCalculator.enemyForks board
+
+        Assert.Equal(1, forks.Length)
+        let forker, forked = List.head forks
+        Assert.Equal({ File = 3; Rank = 1 }, forker)
+        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
+
+    [<Fact>]
+    let ``enemyForks reports a sliding piece forking along two rays`` () =
+        // Black rook on d7 (file=3, rank=1): white rooks on its file (d3) and
+        // rank (g7) are the farthest pieces it attacks along each ray.
+        let board = parse "8/3r2R1/8/8/8/3R4/8/8 w - - 0 1"
+        let forks = AttackCalculator.enemyForks board
+
+        Assert.Equal(1, forks.Length)
+        let forker, forked = List.head forks
+        Assert.Equal({ File = 3; Rank = 1 }, forker)
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 }; { File = 6; Rank = 1 } ], forked)
+
+    [<Fact>]
+    let ``enemyForks ignores a piece attacking only one friendly piece`` () =
+        // Black knight on d7 with a single white rook in range — an attack, not a fork.
+        let board = parse "8/3n4/8/2R5/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForks board)
+
+    [<Fact>]
+    let ``enemyForks ignores forks made by the friendly bottom player`` () =
+        // White knight on d2 (file=3, rank=6) forks two black pawns on c4/e4,
+        // but only enemy (top) forks are reported, so the result is empty.
+        let board = parse "8/8/8/8/2p1p3/8/3N4/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForks board)
+
+    [<Fact>]
+    let ``enemyForks returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForks board)
+
+    [<Fact>]
+    let ``hangingSquares returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``An undefended friendly piece attacked by the enemy is hanging`` () =
+        // Black rook on d8 (screen rank=0, file=3) attacks down the d-file.
+        // White rook on d4 (screen rank=4, file=3) is the first piece it hits and has no defender.
+        let board = parse "3r4/8/8/8/3R4/8/8/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 4 } ], hanging)
+
+    [<Fact>]
+    let ``A friendly piece attacked but defended by another friendly piece is not hanging`` () =
+        // Black rook on d8 attacks white rook on d5 (screen rank=3, file=3).
+        // White rook on a5 (rank=3, file=0) defends d5 along the same rank.
+        let board = parse "3r4/8/8/R2R4/8/8/8/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``A friendly piece that is not attacked is not hanging`` () =
+        // Black knight on a8 (rank=0, file=0) attacks only b6 and c7 in screen coords.
+        // White rook on d1 (rank=7, file=3) is nowhere near its reach.
+        let board = parse "n7/8/8/8/8/8/8/3R4 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``All hanging pieces are reported when multiple exist`` () =
+        // Black rook on a8 attacks white rook on a6 (rank=2, file=0).
+        // Black rook on h8 attacks white rook on h5 (rank=3, file=7).
+        // The two white rooks are on different ranks and cannot defend each other.
+        let board = parse "r6r/8/R7/7R/8/8/8/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 0; Rank = 2 }; { File = 7; Rank = 3 } ], hanging)
+
+    [<Fact>]
+    let ``A friendly pawn defends a piece one rank above it`` () =
+        // Black rook on d8 attacks white rook on d3 (screen rank=5, file=3).
+        // White pawn on e2 (screen rank=6, file=4) attacks (file-1, rank-1) = (3,5) and covers d3.
+        let board = parse "3r4/8/8/8/8/3R4/4P3/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``A friendly piece unprotected by a pawn is hanging even when a pawn is nearby`` () =
+        // Same as above but the pawn is shifted one file away and no longer covers d3.
+        // White pawn on f2 (screen rank=6, file=5) attacks (4,5) and (6,5) — not (3,5).
+        let board = parse "3r4/8/8/8/8/3R4/5P2/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 } ], hanging)
+
+    [<Fact>]
+    let ``hangingSquares works when white is the enemy and black is the friendly player`` () =
+        // White rook on d8 sits on top (enemy); black rook on d3 (screen rank=5, file=3) is
+        // the friendly piece. It is attacked and undefended so it should be reported.
+        let board = parse "3R4/8/8/8/8/3r4/8/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 } ], hanging)
