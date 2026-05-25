@@ -316,44 +316,38 @@ module AttackCalculator =
         )
         |> not
 
+    let private isVulnerableForcedTarget movedBoard piece targetColor targetPawnRankDelta attackerPawnRankDelta (square, targetPiece) =
+        targetPiece.Color = targetColor
+        && forkWorthyTarget piece targetPiece
+        && (targetPiece.Kind = King
+            || not (defendedAgainstAttackers movedBoard targetColor targetPawnRankDelta piece.Color attackerPawnRankDelta square)
+            || lowerValueAttacker movedBoard piece.Color attackerPawnRankDelta square targetPiece)
+
     let private forkedVulnerableTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
         let vulnerableTargets =
             movedBoard
             |> Map.toSeq
-            |> Seq.choose (fun (square, targetPiece) ->
-                if
-                    targetPiece.Color = targetColor
-                    && forkWorthyTarget piece targetPiece
-                    && (targetPiece.Kind = King
-                        || not (
-                            defendedAgainstAttackers
-                                movedBoard
-                                targetColor
-                                targetPawnRankDelta
-                                piece.Color
-                                attackerPawnRankDelta
-                                square
-                        )
-                        || lowerValueAttacker
-                            movedBoard
-                            piece.Color
-                            attackerPawnRankDelta
-                            square
-                            targetPiece
-                    )
-                then
-                    Some square
-                else
-                    None)
+            |> Seq.filter (isVulnerableForcedTarget movedBoard piece targetColor targetPawnRankDelta attackerPawnRankDelta)
+            |> Seq.map fst
             |> Set.ofSeq
 
         Set.intersect (attacksForPieceWithDir movedBoard toSquare piece attackerPawnRankDelta) vulnerableTargets
 
-    // One-move fork opportunities for the friendly bottom player. Each result
-    // is an arrow from the current square to the square where the move would
-    // attack two or more vulnerable enemy pieces.
+    let private forkMoveArrowsForPiece board fromSquare piece friendly enemy =
+        moveSquaresForPiece board fromSquare piece -1
+        |> Seq.filter (fun toSquare -> keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy)
+        |> Seq.filter (fun toSquare -> forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy)
+        |> Seq.choose (fun toSquare ->
+            let forked =
+                forkedVulnerableTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
+
+            if Set.count forked >= 2 then
+                Some(fromSquare, toSquare)
+            else
+                None)
+
     let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
         match enemyColor board with
         | None -> []
@@ -363,18 +357,7 @@ module AttackCalculator =
             board
             |> Map.toSeq
             |> Seq.filter (fun (_, piece) -> piece.Color = friendly)
-            |> Seq.collect (fun (fromSquare, piece) ->
-                moveSquaresForPiece board fromSquare piece -1
-                |> Seq.filter (fun toSquare -> keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy)
-                |> Seq.filter (fun toSquare -> forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy)
-                |> Seq.choose (fun toSquare ->
-                    let forked =
-                        forkedVulnerableTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
-
-                    if Set.count forked >= 2 then
-                        Some(fromSquare, toSquare)
-                    else
-                        None))
+            |> Seq.collect (fun (fromSquare, piece) -> forkMoveArrowsForPiece board fromSquare piece friendly enemy)
             |> Seq.distinct
             |> Seq.toList
 

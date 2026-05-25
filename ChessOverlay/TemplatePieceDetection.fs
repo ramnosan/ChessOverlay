@@ -111,24 +111,23 @@ module PieceTemplateCalibration =
         let color = match piece.Color with Black -> "black" | White -> "white"
         sprintf "%s_%s_%s.png" color (kindName piece) (Squares.name square)
 
+    let private saveTemplate (bitmap: Bitmap) (geometry: BoardGeometry) (path: string) (square: Square) (piece: Piece) =
+        match PieceBitmap.extractSquareBitmap bitmap geometry square with
+        | None -> 0
+        | Some template ->
+            use template = template
+            let filePath = Path.Combine(path, templateFileName piece square)
+            template.Save(filePath, ImageFormat.Png)
+            1
+
     let saveStartingPositionTemplates (bitmap: Bitmap) (geometry: BoardGeometry) (path: string) =
         match Fen.parseBoard startingPosition with
         | Error _ -> 0
         | Ok board ->
             Directory.CreateDirectory path |> ignore
-
             board
             |> Map.toSeq
-            |> Seq.fold
-                (fun savedCount (square, piece) ->
-                    match PieceBitmap.extractSquareBitmap bitmap geometry square with
-                    | None -> savedCount
-                    | Some template ->
-                        use template = template
-                        let filePath = Path.Combine(path, templateFileName piece square)
-                        template.Save(filePath, ImageFormat.Png)
-                        savedCount + 1)
-                0
+            |> Seq.sumBy (fun (square, piece) -> saveTemplate bitmap geometry path square piece)
 
 module BackgroundIsolation =
     // Every piece is drawn with a dark enclosing outline. A captured square is
@@ -281,8 +280,23 @@ module SimilarityComparison =
 
     let private blur (src: float[]) : float[] = blurOnce src
 
-    // Blur restricted to piece pixels, so the transparent background never bleeds
-    // into the template and matching stays independent of board colour.
+    let private kernelBlurWeight (src: float[]) (mask: bool[]) x y =
+        let mutable sum = 0.0
+        let mutable weight = 0.0
+
+        for dy in -1 .. 1 do
+            for dx in -1 .. 1 do
+                let nx = x + dx
+                let ny = y + dy
+                if nx >= 0 && nx < sampleSize && ny >= 0 && ny < sampleSize then
+                    let ni = ny * sampleSize + nx
+                    if mask[ni] then
+                        let w = if dx = 0 && dy = 0 then 4.0 elif dx = 0 || dy = 0 then 2.0 else 1.0
+                        sum <- sum + w * src[ni]
+                        weight <- weight + w
+
+        sum / weight
+
     let private maskedBlur (src: float[]) (mask: bool[]) : float[] =
         let result = Array.copy src
 
@@ -290,21 +304,7 @@ module SimilarityComparison =
             for x in 0 .. sampleSize - 1 do
                 let i = y * sampleSize + x
                 if mask[i] then
-                    let mutable sum = 0.0
-                    let mutable weight = 0.0
-
-                    for dy in -1 .. 1 do
-                        for dx in -1 .. 1 do
-                            let nx = x + dx
-                            let ny = y + dy
-                            if nx >= 0 && nx < sampleSize && ny >= 0 && ny < sampleSize then
-                                let ni = ny * sampleSize + nx
-                                if mask[ni] then
-                                    let w = if dx = 0 && dy = 0 then 4.0 elif dx = 0 || dy = 0 then 2.0 else 1.0
-                                    sum <- sum + w * src[ni]
-                                    weight <- weight + w
-
-                    result[i] <- sum / weight
+                    result[i] <- kernelBlurWeight src mask x y
 
         result
 
