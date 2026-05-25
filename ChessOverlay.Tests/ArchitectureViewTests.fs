@@ -185,4 +185,5 @@ module ArchitectureViewTests =
 
         Assert.Contains("ChessOverlay Architecture", html)
         Assert.Contains("Composition Root", html)
+        Assert.Contains("id=\"exclude-tests\" type=\"checkbox\" checked", html)
         Assert.Contains("BoardGeometry", html)

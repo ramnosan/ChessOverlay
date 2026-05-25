@@ -204,6 +204,15 @@ module AttackCalculatorTests =
         Assert.Empty(AttackCalculator.hangingSquares board)
 
     [<Fact>]
+    let ``A defended friendly piece is hanging when attacked by a lower-value enemy piece`` () =
+        // Black knight on d7 attacks the white queen on e5. The queen is defended
+        // by the rook on a5, but trading a knight for a queen still wins material.
+        let board = parse "8/3n4/8/R3Q3/8/8/8/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 4; Rank = 3 } ], hanging)
+
+    [<Fact>]
     let ``A friendly piece that is not attacked is not hanging`` () =
         // Black knight on a8 (rank=0, file=0) attacks only b6 and c7 in screen coords.
         // White rook on d1 (rank=7, file=3) is nowhere near its reach.

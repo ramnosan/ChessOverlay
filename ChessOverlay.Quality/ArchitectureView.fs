@@ -174,8 +174,105 @@ module ArchitectureView =
         },
         text
 
+    let private dependencySourceText (text: string) =
+        let builder = StringBuilder(text.Length)
+        let mutable index = 0
+
+        let appendSpace () =
+            builder.Append(' ') |> ignore
+            index <- index + 1
+
+        let appendChar () =
+            builder.Append(text[index]) |> ignore
+            index <- index + 1
+
+        let startsWith (value: string) =
+            index + value.Length <= text.Length
+            && String.CompareOrdinal(text, index, value, 0, value.Length) = 0
+
+        let rec skipBlockComment depth =
+            if index < text.Length then
+                if startsWith "(*" then
+                    appendSpace ()
+                    appendSpace ()
+                    skipBlockComment (depth + 1)
+                elif startsWith "*)" then
+                    appendSpace ()
+                    appendSpace ()
+
+                    if depth > 1 then
+                        skipBlockComment (depth - 1)
+                else
+                    appendSpace ()
+                    skipBlockComment depth
+
+        let skipLineComment () =
+            while index < text.Length && text[index] <> '\n' do
+                appendSpace ()
+
+        let skipTripleQuotedString () =
+            while index < text.Length && not (startsWith "\"\"\"") do
+                appendSpace ()
+
+            if startsWith "\"\"\"" then
+                appendSpace ()
+                appendSpace ()
+                appendSpace ()
+
+        let skipVerbatimString () =
+            let mutable closedString = false
+
+            while index < text.Length && not closedString do
+                if text[index] = '"' && index + 1 < text.Length && text[index + 1] = '"' then
+                    appendSpace ()
+                    appendSpace ()
+                elif text[index] = '"' then
+                    appendSpace ()
+                    closedString <- true
+                else
+                    appendSpace ()
+
+        let skipString () =
+            let mutable escaped = false
+            let mutable closedString = false
+
+            while index < text.Length && not closedString do
+                let current = text[index]
+                appendSpace ()
+
+                if escaped then
+                    escaped <- false
+                elif current = '\\' then
+                    escaped <- true
+                elif current = '"' then
+                    closedString <- true
+
+        while index < text.Length do
+            if startsWith "(*" then
+                appendSpace ()
+                appendSpace ()
+                skipBlockComment 1
+            elif startsWith "//" then
+                skipLineComment ()
+            elif startsWith "\"\"\"" then
+                appendSpace ()
+                appendSpace ()
+                appendSpace ()
+                skipTripleQuotedString ()
+            elif startsWith "@\"" then
+                appendSpace ()
+                appendSpace ()
+                skipVerbatimString ()
+            elif text[index] = '"' then
+                appendSpace ()
+                skipString ()
+            else
+                appendChar ()
+
+        builder.ToString()
+
     let private tokens (text: string) =
-        tokenPattern.Matches(text)
+        tokenPattern.Matches(dependencySourceText text)
         |> Seq.cast<Match>
         |> Seq.map _.Value
         |> Set.ofSeq
@@ -500,6 +597,8 @@ body {{ margin: 0; font-family: Segoe UI, system-ui, sans-serif; color: var(--in
 .toolbar {{ position: sticky; top: 0; z-index: 5; display: flex; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--line); background: rgba(251,252,251,.96); }}
 h1 {{ font-size: 20px; margin: 0 18px 0 0; }}
 input {{ min-width: 260px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }}
+.option {{ display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }}
+.option input {{ min-width: 0; }}
 main {{ display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; padding: 18px; }}
 h2 {{ font-size: 16px; margin: 0 0 8px; }}
 #diagram {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; }}
@@ -510,6 +609,7 @@ h2 {{ font-size: 16px; margin: 0 0 8px; }}
 .node:hover rect, .node.selected rect {{ fill: #d6e6e0; stroke: var(--accent); stroke-width: 2; }}
 .node.cycle rect {{ stroke: var(--warn); }}
 .node.dim {{ opacity: 0.25; }}
+.node.hidden, .edges path.hidden {{ display: none; }}
 .edges path {{ fill: none; stroke: #65736b; stroke-width: 1.5; }}
 .edges path.cycle {{ stroke: var(--warn); stroke-dasharray: 4 3; }}
 .edges path.highlight {{ stroke: var(--accent); stroke-width: 2.5; }}
@@ -530,8 +630,9 @@ aside {{ position: sticky; top: 68px; align-self: start; border-left: 1px solid 
 <div class="toolbar">
   <h1>ChessOverlay Architecture</h1>
   <input id="filter" placeholder="Filter modules, layers, symbols">
-  <span>{model.Modules.Length} modules</span>
-  <span>{model.Dependencies.Length} dependencies</span>
+  <label class="option"><input id="exclude-tests" type="checkbox" checked> Exclude tests</label>
+  <span id="module-count">{model.Modules.Length} modules</span>
+  <span id="dependency-count">{model.Dependencies.Length} dependencies</span>
   <span>{model.Cycles.Length} cycles</span>
 </div>
 <main>
@@ -552,8 +653,13 @@ const edges = [{edgesJson}];
 const byId = Object.fromEntries(modules.map(module => [module.id, module]));
 const details = document.querySelector("#details");
 const title = document.querySelector("#details-title");
+const filterInput = document.querySelector("#filter");
+const excludeTestsInput = document.querySelector("#exclude-tests");
+const moduleCount = document.querySelector("#module-count");
+const dependencyCount = document.querySelector("#dependency-count");
 const nodes = () => document.querySelectorAll("#diagram-svg .node");
 const edgePaths = () => document.querySelectorAll("#diagram-svg .edges path");
+let selectedModuleId = null;
 function describeEdge(edge, direction) {{
   const other = direction === "out" ? byId[edge.to] : byId[edge.from];
   const arrow = direction === "out" ? "→" : "←";
@@ -562,6 +668,8 @@ function describeEdge(edge, direction) {{
   return `<div class="edge ${{edge.cycle ? "cycle" : ""}}"><span class="arrow ${{arrowClass}}">${{arrow}}</span><strong>${{other.name}}</strong><br><span>${{other.file}}${{symbols}}</span></div>`;
 }}
 function selectModule(id) {{
+  if (!isModuleVisible(id)) return;
+  selectedModuleId = id;
   nodes().forEach(node => node.classList.toggle("selected", node.dataset.module === id));
   edgePaths().forEach(path => {{
     const related = path.dataset.from === id || path.dataset.to === id;
@@ -577,15 +685,45 @@ function selectModule(id) {{
     `<h3>Incoming</h3>${{incoming.length ? incoming.map(edge => describeEdge(edge, "in")).join("") : "<p class='empty'>No incoming dependencies.</p>"}}`;
 }}
 nodes().forEach(node => node.addEventListener("click", () => selectModule(node.dataset.module)));
-document.querySelector("#filter").addEventListener("input", event => {{
-  const value = event.target.value.toLowerCase();
+function isModuleVisible(id) {{
+  const module = byId[id];
+  return module && (!excludeTestsInput.checked || module.layer !== "Test Suite");
+}}
+function clearSelection() {{
+  selectedModuleId = null;
+  title.textContent = "Select a module";
+  details.className = "empty";
+  details.textContent = "Click a module to inspect incoming and outgoing dependencies.";
+  nodes().forEach(node => node.classList.remove("selected"));
+  edgePaths().forEach(path => path.classList.remove("highlight"));
+}}
+function applyFilters() {{
+  const value = filterInput.value.toLowerCase();
   const matches = new Set();
   modules.forEach(module => {{
     const haystack = [module.name, module.file, module.layer, ...module.symbols].join(" ").toLowerCase();
     if (!value || haystack.includes(value)) matches.add(module.id);
   }});
-  nodes().forEach(node => node.classList.toggle("dim", !matches.has(node.dataset.module)));
-}});
+  nodes().forEach(node => {{
+    const visible = isModuleVisible(node.dataset.module);
+    node.classList.toggle("hidden", !visible);
+    node.classList.toggle("dim", visible && !matches.has(node.dataset.module));
+  }});
+  let visibleEdges = 0;
+  edgePaths().forEach(path => {{
+    const visible = isModuleVisible(path.dataset.from) && isModuleVisible(path.dataset.to);
+    path.classList.toggle("hidden", !visible);
+    if (visible) visibleEdges++;
+  }});
+  const visibleModules = modules.filter(module => isModuleVisible(module.id)).length;
+  moduleCount.textContent = `${{visibleModules}} modules`;
+  dependencyCount.textContent = `${{visibleEdges}} dependencies`;
+
+  if (selectedModuleId && !isModuleVisible(selectedModuleId)) clearSelection();
+}}
+filterInput.addEventListener("input", applyFilters);
+excludeTestsInput.addEventListener("change", applyFilters);
+applyFilters();
 </script>
 </body>
 </html>"""

@@ -143,8 +143,25 @@ module AttackCalculator =
         |> fun attacks ->
             if Seq.isEmpty attacks then Set.empty else Set.unionMany attacks
 
-    // Friendly (bottom) pieces that are attacked by the enemy and not defended
-    // by another friendly piece.
+    let private pieceValue piece =
+        match piece.Kind with
+        | Pawn -> 1
+        | Knight
+        | Bishop -> 3
+        | Rook -> 5
+        | Queen -> 9
+        | King -> 100
+
+    let private lowerValueEnemyAttacker board enemy square friendlyPiece =
+        board
+        |> Map.toSeq
+        |> Seq.exists (fun (attackerSquare, attacker) ->
+            attacker.Color = enemy
+            && pieceValue friendlyPiece > pieceValue attacker
+            && Set.contains square (attacksForPiece board attackerSquare attacker))
+
+    // Friendly (bottom) pieces that are attacked by the enemy and either not
+    // defended by another friendly piece or attacked by a lower-value piece.
     let hangingSquares (board: BoardState) : Set<Square> =
         match enemyColor board with
         | None -> Set.empty
@@ -158,7 +175,8 @@ module AttackCalculator =
             |> Seq.filter (fun (square, piece) ->
                 piece.Color = friendly
                 && Set.contains square enemyAttacks
-                && not (Set.contains square friendlyDefends))
+                && (not (Set.contains square friendlyDefends)
+                    || lowerValueEnemyAttacker board enemy square piece))
             |> Seq.map fst
             |> Set.ofSeq
 
