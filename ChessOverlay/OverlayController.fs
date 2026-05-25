@@ -50,6 +50,38 @@ type OverlayController(
         | _, Some boardReading when boardReading.Board.IsEmpty -> "Board selected - 0 pieces matched"
         | _, Some boardReading -> sprintf "Board selected - only %i pieces matched" boardReading.Board.Count
 
+    let candidateNotation piece =
+        let color =
+            match piece.Color with
+            | Top -> "b"
+            | Bottom -> "w"
+
+        let kind =
+            match piece.Kind with
+            | King -> "K"
+            | Queen -> "Q"
+            | Rook -> "R"
+            | Bishop -> "B"
+            | Knight -> "N"
+            | Pawn -> "P"
+
+        color + kind
+
+    let logCandidates (reading: BoardReading) =
+        if timingEnabled then
+            reading.Candidates
+            |> Map.toSeq
+            |> Seq.choose (fun (square, candidates) ->
+                candidates
+                |> List.tryHead
+                |> Option.map (fun candidate -> square, candidate))
+            |> Seq.sortByDescending (fun (_, candidate) -> candidate.Score)
+            |> Seq.truncate 16
+            |> Seq.map (fun (square, candidate) ->
+                sprintf "%s=%s %.2f" (Squares.name square) (candidateNotation candidate.Piece) candidate.Score)
+            |> String.concat "; "
+            |> fun summary -> Debug.WriteLine("Piece candidates: " + summary)
+
     let scanOnce () =
         try
             let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
@@ -58,6 +90,7 @@ type OverlayController(
             let screenGeometry = toVirtualScreenGeometry origin boardGeometry
 
             let reading = measure "piece-reading" (fun () -> reader.Read(capture, boardGeometry))
+            reading |> Option.iter logCandidates
 
             match reading with
             | Some boardReading when boardReading.Confidence >= confidenceThreshold ->

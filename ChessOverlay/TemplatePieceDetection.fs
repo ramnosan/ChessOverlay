@@ -206,20 +206,31 @@ module SimilarityComparison =
         |> Seq.map (fun (piece, bmp) -> piece, toGrayscaleArray bmp)
         |> Seq.toArray
 
-    let findBestMatch (templates: (Piece * float[]) array) (squareBitmap: Bitmap) (threshold: float) : Piece option =
-        let squareGray = toGrayscaleArray squareBitmap
-
+    let rankMatches (templates: (Piece * float[]) array) (squareGray: float[]) : (Piece * float) list =
         templates
-        |> Array.fold
-            (fun best (piece, templateGray) ->
-                let score = ncc templateGray squareGray
+        |> Array.map (fun (piece, templateGray) -> piece, ncc templateGray squareGray)
+        |> Array.sortByDescending snd
+        |> Array.toList
 
-                match best with
-                | Some(_, bestScore) when bestScore >= score -> best
-                | _ when score >= threshold -> Some(piece, score)
-                | _ -> best)
-            None
+    let private acceptanceThreshold threshold piece =
+        match piece.Kind with
+        | Pawn -> threshold * 0.85
+        | _ -> threshold
+
+    let tryAcceptBestMatch (threshold: float) (matches: (Piece * float) list) : Piece option =
+        matches
+        |> List.tryFind (fun (piece, score) -> score >= acceptanceThreshold threshold piece)
         |> Option.map fst
+
+    let tryAcceptBestCandidate (threshold: float) (matches: (Piece * float) list) : (Piece * float) option =
+        matches
+        |> List.tryFind (fun (piece, score) -> score >= acceptanceThreshold threshold piece)
+
+    let findBestMatch (templates: (Piece * float[]) array) (squareBitmap: Bitmap) (threshold: float) : Piece option =
+        squareBitmap
+        |> toGrayscaleArray
+        |> rankMatches templates
+        |> tryAcceptBestMatch threshold
 
 type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
     let preparedTemplates = SimilarityComparison.prepareTemplates templates
@@ -243,6 +254,7 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
                 None
             else
                 let mutable board = Map.empty
+                let mutable candidates = Map.empty
                 let mutable matchCount = 0
 
                 for square in Squares.all do
@@ -251,17 +263,25 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, threshold: float) =
                     | Some squareBmp ->
                         use squareBmp = squareBmp
                         let squareGray = SimilarityComparison.toGrayscaleArray squareBmp
+                        let rankedMatches = SimilarityComparison.rankMatches preparedTemplates squareGray
 
-                        if SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold then
-                            match SimilarityComparison.findBestMatch preparedTemplates squareBmp threshold with
-                            | Some piece ->
+                        let squareCandidates =
+                            rankedMatches
+                            |> List.truncate 3
+                            |> List.map (fun (piece, score) -> { Piece = piece; Score = score })
+
+                        candidates <- Map.add square squareCandidates candidates
+
+                        match SimilarityComparison.tryAcceptBestCandidate threshold rankedMatches with
+                        | Some(piece, score) ->
+                            if SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold || score >= threshold then
                                 board <- Map.add square piece board
                                 matchCount <- matchCount + 1
-                            | None -> ()
+                        | None -> ()
 
                 let confidence =
                     if matchCount = 0 then 0.0
                     elif matchCount >= 4 then 1.0
                     else 0.5
 
-                Some { Board = board; Confidence = confidence }
+                Some { Board = board; Confidence = confidence; Candidates = candidates }

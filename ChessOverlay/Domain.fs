@@ -53,6 +53,13 @@ type BoardReading =
     {
         Board: BoardState
         Confidence: float
+        Candidates: Map<Square, PieceMatchCandidate list>
+    }
+
+and PieceMatchCandidate =
+    {
+        Piece: Piece
+        Score: float
     }
 
 type OverlayFrame =

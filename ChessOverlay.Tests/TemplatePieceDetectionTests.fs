@@ -41,6 +41,9 @@ module TemplatePieceDetectionTests =
         templates
         |> Array.iter (fun (_, bitmap) -> bitmap.Dispose())
 
+    let private fixturePath fileName =
+        Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName)
+
     let private pieceNotation piece =
         let letter =
             match piece.Kind with
@@ -52,6 +55,22 @@ module TemplatePieceDetectionTests =
             | Pawn -> "P"
 
         if piece.Color = Top then letter.ToLowerInvariant() else letter
+
+    let private candidateSummary (reading: BoardReading) (expected: BoardState) =
+        expected
+        |> Map.toSeq
+        |> Seq.filter (fun (square, piece) -> BoardState.tryPieceAt square reading.Board <> Some piece)
+        |> Seq.map (fun (square, expectedPiece) ->
+            let candidates =
+                reading.Candidates
+                |> Map.tryFind square
+                |> Option.defaultValue []
+                |> List.truncate 3
+                |> List.map (fun candidate -> sprintf "%s %.3f" (pieceNotation candidate.Piece) candidate.Score)
+                |> String.concat ", "
+
+            sprintf "%s expected=%s candidates=[%s]" (Squares.name square) (pieceNotation expectedPiece) candidates)
+        |> String.concat "; "
 
     let private drawStartingPositionBoard size =
         let bitmap = new Bitmap(size, size)
@@ -146,7 +165,18 @@ module TemplatePieceDetectionTests =
         | Some reading ->
             Assert.Equal(0.5, reading.Confidence)
             Assert.Equal(Some piece, BoardState.tryPieceAt { File = 0; Rank = 0 } reading.Board)
+            let candidates = Map.find { File = 0; Rank = 0 } reading.Candidates
+            Assert.Equal(piece, candidates.Head.Piece)
+            Assert.True(candidates.Head.Score >= 0.9)
         | None -> failwith "Expected template reader output."
+
+    [<Fact>]
+    let ``Template matcher accepts lower-scoring pawns before other pieces`` () =
+        let pawn = { Color = Bottom; Kind = Pawn }
+        let knight = { Color = Bottom; Kind = Knight }
+
+        Assert.Equal(Some pawn, SimilarityComparison.tryAcceptBestMatch 0.9 [ pawn, 0.78 ])
+        Assert.True(SimilarityComparison.tryAcceptBestMatch 0.9 [ knight, 0.78 ] |> Option.isNone)
 
     [<Fact>]
     let ``Template reader reports no board when no templates are configured`` () =
@@ -200,7 +230,7 @@ module TemplatePieceDetectionTests =
         let templates = PieceTemplates.loadAllFromDirectory root
 
         try
-            let reader = TemplateBoardReader(templates, 0.99) :> IBoardReader
+            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
 
             match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
             | Some reading, Ok expected ->
@@ -213,6 +243,45 @@ module TemplatePieceDetectionTests =
         finally
             disposeAllTemplates templates
 
+    [<Fact>]
+    let ``Template reader detects all pieces on selected board screenshot with saved templates`` () =
+        use bitmap = new Bitmap(fixturePath "chess_screenshot_starting position.png")
+        let geometry = { Left = 0; Top = 0; Size = bitmap.Width }
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+
+        try
+            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+
+            match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
+            | Some reading, Ok expected ->
+                Assert.Equal(32, templates.Length)
+                Assert.Equal(1.0, reading.Confidence)
+                Assert.True((expected = reading.Board), candidateSummary reading expected)
+            | None, _ -> failwith "Expected template reader output."
+            | _, Error message -> failwith message
+        finally
+            disposeAllTemplates templates
+
+    [<Fact>]
+    let ``Template reader detects all pieces on alternate starting board screenshot`` () =
+        use bitmap = new Bitmap(fixturePath "chess_board_start2.png")
+        let geometry = { Left = 0; Top = 0; Size = bitmap.Width }
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+
+        try
+            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+
+            match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
+            | Some reading, Ok expected ->
+                Assert.Equal(32, templates.Length)
+                Assert.Equal(1.0, reading.Confidence)
+                Assert.True((expected = reading.Board), candidateSummary reading expected)
+            | None, _ -> failwith "Expected template reader output."
+            | _, Error message -> failwith message
+        finally
+            disposeAllTemplates templates
+
+    [<Fact>]
     let ``Template reader leaves empty squares unoccupied`` () =
         let root = tempRoot ()
         use startingBitmap = drawStartingPositionBoard 800

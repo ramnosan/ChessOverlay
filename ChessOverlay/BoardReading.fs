@@ -10,7 +10,7 @@ type FenBoardReader(fen: string) =
     interface IBoardReader with
         member _.Read(_, _) =
             match Fen.parseBoard fen with
-            | Ok board -> Some { Board = board; Confidence = 1.0 }
+            | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
             | Error _ -> None
 
 type UncertainBoardReader() =

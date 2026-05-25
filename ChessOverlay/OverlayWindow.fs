@@ -9,7 +9,8 @@ open System.Windows.Forms
 type OverlayWindow() as this =
     inherit Form()
 
-    let highlightColor = Color.FromArgb(96, 220, 30, 30)
+    let transparentColor = Color.Magenta
+    let highlightColor = Color.Red
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
@@ -23,8 +24,9 @@ type OverlayWindow() as this =
         this.Bounds <- virtualBounds
         this.TopMost <- true
         this.ShowInTaskbar <- false
-        this.BackColor <- Color.Magenta
-        this.TransparencyKey <- Color.Magenta
+        this.BackColor <- transparentColor
+        this.TransparencyKey <- transparentColor
+        this.Opacity <- 0.6
         this.DoubleBuffered <- true
         this.Text <- "Chess Overlay"
 
