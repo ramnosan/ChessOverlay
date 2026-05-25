@@ -2,7 +2,7 @@
   "profiles": {
     "ChessOverlay.Quality": {
       "commandName": "Project",
-      "commandLineArgs": "dry",
+      "commandLineArgs": "all",
       "workingDirectory": ".."
     }
   }

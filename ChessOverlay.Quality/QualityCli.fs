@@ -11,12 +11,16 @@ module QualityCli =
         """ChessOverlay.Quality
 
 Commands:
-  dry     Find candidate duplicate F# code. This is the default command.
+  all     Run the default quality checks. This is the default command.
+  dry     Find candidate duplicate F# code.
   crap    Compute CRAP-style risk scores for app F# code.
   arch    Generate a layered architecture view for ChessOverlay.
 
-DRY usage:
+ALL usage:
   dotnet run --project ChessOverlay.Quality
+  dotnet run --project ChessOverlay.Quality -- all
+
+DRY usage:
   dotnet run --project ChessOverlay.Quality -- dry --threshold 0.86 --min-lines 8
   dotnet run --project ChessOverlay.Quality -- dry --format edn ChessOverlay
 
@@ -251,6 +255,21 @@ ARCH options:
         else
             0
 
+    let private runAll () =
+        printfn "DRY"
+        printfn "%s" (String('-', 78))
+        let dryExitCode = runDry []
+
+        printfn ""
+        printfn "CRAP"
+        printfn "%s" (String('-', 78))
+        let crapExitCode = runCrap []
+
+        if dryExitCode <> 0 then
+            dryExitCode
+        else
+            crapExitCode
+
     let private runArch args =
         let options =
             {
@@ -291,7 +310,9 @@ ARCH options:
         | "help" :: _ ->
             printf "%s" usage
             0
+        | "all" :: [] -> runAll ()
         | "dry" :: tail -> runDry tail
         | "crap" :: tail -> runCrap tail
         | "arch" :: tail -> runArch tail
+        | [] -> runAll ()
         | _ -> runDry args
