@@ -338,6 +338,24 @@ module AttackCalculatorTests =
         Assert.Contains(({ File = 4; Rank = 5 }, { File = 5; Rank = 3 }), arrows)
 
     [<Fact>]
+    let ``friendlyForkMoveArrows reports Capablanca Graham rook fork from published puzzle FEN`` () =
+        // ChessWorld, Capablanca vs Graham, Puzzle ID 714: 1.Rxc6+ forks the
+        // black king on c8 and queen on d6 from the published FEN.
+        let board = parse "r1k5/p6p/2nqrp2/p2N4/3p4/5QP1/1P3P1P/R1R3K1 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 2; Rank = 7 }, { File = 2; Rank = 2 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows does not report Korchnoi Smirin setup retreat as an immediate fork`` () =
+        // ChessWorld, Korchnoi vs Smirin, Puzzle ID 1563: 1.Nc1 is a real-game
+        // setup move, but the premove overlay should only show immediate forks.
+        let board = parse "r3r1k1/ppp3b1/3p3p/3P3Q/1qP2P2/3b1B1P/P3NPK1/4R2R w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 6 }, { File = 2; Rank = 7 }), arrows)
+
+    [<Fact>]
     let ``friendlyForkMoveArrows ignores defended equal-value targets`` () =
         // From f3 the knight would attack both black knights, but the bishop on
         // f6 defends both and the exchange is not favorable.
