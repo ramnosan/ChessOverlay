@@ -148,16 +148,39 @@ module AttackCalculator =
         | Queen -> 9
         | King -> 100
 
-    let private lowerValueAttacker board attackerColor attackerPawnRankDelta square targetPiece =
+    let private piecesAttackingSquare board attackerColor attackerPawnRankDelta square =
         board
         |> Map.toSeq
-        |> Seq.exists (fun (attackerSquare, attacker) ->
+        |> Seq.filter (fun (attackerSquare, attacker) ->
             attacker.Color = attackerColor
-            && pieceValue targetPiece > pieceValue attacker
             && Set.contains square (attacksForPieceWithDir board attackerSquare attacker attackerPawnRankDelta))
+        |> Seq.toList
+
+    let private lowerValueAttacker board attackerColor attackerPawnRankDelta square targetPiece =
+        piecesAttackingSquare board attackerColor attackerPawnRankDelta square
+        |> Seq.exists (fun (_, attacker) -> pieceValue targetPiece > pieceValue attacker)
+
+    let private protectedAfterCapture board attackerColor attackerPawnRankDelta targetSquare attackerSquare attacker =
+        let boardAfterCapture =
+            board
+            |> Map.remove attackerSquare
+            |> Map.add targetSquare attacker
+
+        Set.contains targetSquare (attackedSquaresByColorWithDir boardAfterCapture attackerColor attackerPawnRankDelta)
+
+    let private defendedAgainstAttackers board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta square =
+        let defenders = piecesAttackingSquare board targetColor targetPawnRankDelta square
+
+        if defenders |> Seq.exists (fun (_, defender) -> defender.Kind <> King) then
+            true
+        elif defenders |> Seq.exists (fun (_, defender) -> defender.Kind = King) then
+            piecesAttackingSquare board attackerColor attackerPawnRankDelta square
+            |> Seq.forall (fun (attackerSquare, attacker) ->
+                not (protectedAfterCapture board attackerColor attackerPawnRankDelta square attackerSquare attacker))
+        else
+            false
 
     let private hangingSquaresFor board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta =
-        let targetDefends = attackedSquaresByColorWithDir board targetColor targetPawnRankDelta
         let attackerAttacks = attackedSquaresByColorWithDir board attackerColor attackerPawnRankDelta
 
         board
@@ -165,7 +188,7 @@ module AttackCalculator =
         |> Seq.filter (fun (square, piece) ->
             piece.Color = targetColor
             && Set.contains square attackerAttacks
-            && (not (Set.contains square targetDefends)
+            && (not (defendedAgainstAttackers board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta square)
                 || lowerValueAttacker board attackerColor attackerPawnRankDelta square piece))
         |> Seq.map fst
         |> Set.ofSeq
@@ -235,13 +258,23 @@ module AttackCalculator =
 
     let private forkedUndefendedTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
-        let targetDefended = attackedSquaresByColorWithDir movedBoard targetColor targetPawnRankDelta
 
         let undefendedTargets =
             movedBoard
             |> Map.toSeq
             |> Seq.choose (fun (square, targetPiece) ->
-                if targetPiece.Color = targetColor && not (Set.contains square targetDefended) then
+                if
+                    targetPiece.Color = targetColor
+                    && not (
+                        defendedAgainstAttackers
+                            movedBoard
+                            targetColor
+                            targetPawnRankDelta
+                            piece.Color
+                            attackerPawnRankDelta
+                            square
+                    )
+                then
                     Some square
                 else
                     None)

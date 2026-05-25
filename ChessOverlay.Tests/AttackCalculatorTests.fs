@@ -204,6 +204,24 @@ module AttackCalculatorTests =
         Assert.Empty(AttackCalculator.hangingSquares board)
 
     [<Fact>]
+    let ``A friendly piece defended only by the king is not hanging when the attacker is loose`` () =
+        // Black queen on d8 attacks the white rook on d3. The white king on e2
+        // can recapture on d3 if the queen takes because no black piece protects d3.
+        let board = parse "3q4/8/8/8/8/3R4/4K3/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``A friendly piece defended only by the king is hanging when a protected attacker can take it`` () =
+        // The white king defends the rook on d3, but black's queen and rook both
+        // attack d3. After either capture, the other black piece protects d3, so
+        // the king cannot legally recapture.
+        let board = parse "3q4/8/8/8/8/r2R4/4K3/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 } ], hanging)
+
+    [<Fact>]
     let ``A defended friendly piece is hanging when attacked by a lower-value enemy piece`` () =
         // Black knight on d7 attacks the white queen on e5. The queen is defended
         // by the rook on a5, but trading a knight for a queen still wins material.
