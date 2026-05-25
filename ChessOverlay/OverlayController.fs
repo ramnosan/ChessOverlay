@@ -101,6 +101,11 @@ type OverlayController(
                     let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
                     let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
 
+                    let forkSquares =
+                        AttackCalculator.enemyForks boardReading.Board
+                        |> List.map fst
+                        |> Set.ofList
+
                     measure
                         "overlay-update"
                         (fun () ->
@@ -111,6 +116,7 @@ type OverlayController(
                                             Geometry = screenGeometry
                                             AttackArrows = attackArrows
                                             HangingSquares = hangingSquares
+                                            ForkSquares = forkSquares
                                             DetectedPieces = Some boardReading.Board
                                         }))
                 | _ ->

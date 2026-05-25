@@ -13,6 +13,7 @@ type OverlayWindow() as this =
     let arrowColor = Color.FromArgb(255, 210, 30, 30)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let hangingColor = Color.FromArgb(210, 255, 140, 0)
+    let forkColor = Color.FromArgb(230, 255, 215, 0)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
     let mutable frame: OverlayFrame option = None
@@ -61,7 +62,11 @@ type OverlayWindow() as this =
             match nextFrame.DetectedPieces with
             | Some board -> (AttackCalculator.enemyAttackedSquares board).Count
             | None -> 0
-        statusText <- sprintf "Board selected - %i attacked squares" attackedCount
+        statusText <-
+            if nextFrame.ForkSquares.IsEmpty then
+                sprintf "Board selected - %i attacked squares" attackedCount
+            else
+                sprintf "Board selected - %i attacked squares, %i fork(s)" attackedCount nextFrame.ForkSquares.Count
         this.Invalidate()
 
     member _.ShowStatus(message: string) =
@@ -75,6 +80,7 @@ type OverlayWindow() as this =
                     Geometry = geometry
                     AttackArrows = []
                     HangingSquares = Set.empty
+                    ForkSquares = Set.empty
                     DetectedPieces = None
                 }
 
@@ -108,6 +114,20 @@ type OverlayWindow() as this =
                 let inset = rect.Width * 0.1f
                 args.Graphics.DrawEllipse(
                     hangingPen,
+                    rect.X + inset,
+                    rect.Y + inset,
+                    rect.Width - 2.0f * inset,
+                    rect.Height - 2.0f * inset)
+
+            // A fork is an enemy piece hitting two or more friendly pieces; mark
+            // its square so the more dangerous threat stands out from plain attacks.
+            use forkPen = new Pen(forkColor, penWidth * 1.8f)
+
+            for sq in current.ForkSquares do
+                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                let inset = rect.Width * 0.1f
+                args.Graphics.DrawRectangle(
+                    forkPen,
                     rect.X + inset,
                     rect.Y + inset,
                     rect.Width - 2.0f * inset,

@@ -67,6 +67,7 @@ type OverlayFrame =
         Geometry: BoardGeometry
         AttackArrows: (Square * Square) list
         HangingSquares: Set<Square>
+        ForkSquares: Set<Square>
         DetectedPieces: BoardState option
     }
 

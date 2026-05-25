@@ -130,25 +130,27 @@ module AttackCalculator =
             |> Seq.collect (fun (square, piece) -> pieceArrows board square piece)
             |> Seq.toList
 
+    // Squares the friendly (bottom) player defends. Friendly pawns defend upward
+    // (rankDelta = -1), opposite the enemy pawns handled elsewhere.
+    let private friendlyDefendedSquares (board: BoardState) friendly : Set<Square> =
+        board
+        |> Map.toSeq
+        |> Seq.choose (fun (square, piece) ->
+            if piece.Color = friendly then
+                Some(attackRaysForPieceWithDir board square piece -1 |> List.concat |> Set.ofList)
+            else
+                None)
+        |> fun attacks ->
+            if Seq.isEmpty attacks then Set.empty else Set.unionMany attacks
+
     // Friendly (bottom) pieces that are attacked by the enemy and not defended
-    // by another friendly piece. Friendly pawns attack upward (rankDelta = -1).
+    // by another friendly piece.
     let hangingSquares (board: BoardState) : Set<Square> =
         match enemyColor board with
         | None -> Set.empty
         | Some enemy ->
             let friendly = if enemy = White then Black else White
-
-            let friendlyDefends =
-                board
-                |> Map.toSeq
-                |> Seq.choose (fun (square, piece) ->
-                    if piece.Color = friendly then
-                        Some(attackRaysForPieceWithDir board square piece -1 |> List.concat |> Set.ofList)
-                    else
-                        None)
-                |> fun attacks ->
-                    if Seq.isEmpty attacks then Set.empty else Set.unionMany attacks
-
+            let friendlyDefends = friendlyDefendedSquares board friendly
             let enemyAttacks = attackedSquaresByColor board enemy
 
             board
@@ -160,28 +162,34 @@ module AttackCalculator =
             |> Seq.map fst
             |> Set.ofSeq
 
-    // A fork is a single enemy (top) piece that attacks two or more friendly
-    // pieces at once. Each result pairs the forking square with the set of
-    // friendly squares it attacks. Sliding pieces "attack" the friendly piece
-    // sitting on a ray because attacksForPiece includes the blocker square.
+    // A fork is a single enemy (top) piece that attacks two or more *undefended*
+    // friendly pieces at once. Defended pieces are excluded: if their defender
+    // can recapture, the enemy wins no material, so it isn't a real fork. Each
+    // result pairs the forking square with the undefended friendly squares it
+    // hits. Sliding pieces "attack" the piece on a ray because attacksForPiece
+    // includes the blocker square.
     let enemyForks (board: BoardState) : (Square * Set<Square>) list =
         match enemyColor board with
         | None -> []
         | Some enemy ->
             let friendly = if enemy = White then Black else White
+            let defended = friendlyDefendedSquares board friendly
 
-            let friendlySquares =
+            let undefendedFriendly =
                 board
                 |> Map.toSeq
                 |> Seq.choose (fun (square, piece) ->
-                    if piece.Color = friendly then Some square else None)
+                    if piece.Color = friendly && not (Set.contains square defended) then
+                        Some square
+                    else
+                        None)
                 |> Set.ofSeq
 
             board
             |> Map.toSeq
             |> Seq.filter (fun (_, piece) -> piece.Color = enemy)
             |> Seq.choose (fun (square, piece) ->
-                let forked = Set.intersect (attacksForPiece board square piece) friendlySquares
+                let forked = Set.intersect (attacksForPiece board square piece) undefendedFriendly
 
                 if Set.count forked >= 2 then Some(square, forked) else None)
             |> Seq.toList

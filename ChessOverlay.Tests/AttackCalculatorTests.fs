@@ -121,8 +121,9 @@ module AttackCalculatorTests =
     [<Fact>]
     let ``enemyForks reports a knight attacking two friendly pieces`` () =
         // Black knight on d7 (file=3, rank=1) sits on top (enemy); two white
-        // rooks on c5/e5 (rank=3) are both knight-attacked from there.
-        let board = parse "8/3n4/8/2R1R3/8/8/8/8 w - - 0 1"
+        // knights on c5/e5 (rank=3) are both attacked and do not defend each
+        // other, so both are hanging.
+        let board = parse "8/3n4/8/2N1N3/8/8/8/8 w - - 0 1"
         let forks = AttackCalculator.enemyForks board
 
         Assert.Equal(1, forks.Length)
@@ -159,6 +160,26 @@ module AttackCalculatorTests =
     let ``enemyForks returns empty for an empty board`` () =
         let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
         Assert.Empty(AttackCalculator.enemyForks board)
+
+    [<Fact>]
+    let ``enemyForks ignores defended pieces`` () =
+        // Black knight on d7 attacks both white rooks, but the rooks defend each
+        // other along the 5th rank, so neither is hanging — not a real fork.
+        let board = parse "8/3n4/8/2R1R3/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForks board)
+
+    [<Fact>]
+    let ``enemyForks counts only the undefended pieces in a mixed fork`` () =
+        // Black knight on d7 attacks white knights on c5/e5 (undefended) plus a
+        // white pawn on f6 that a white rook on f3 defends. The defended pawn is
+        // excluded, leaving the two knights as the fork.
+        let board = parse "8/3n4/5P2/2N1N3/8/5R2/8/8 w - - 0 1"
+        let forks = AttackCalculator.enemyForks board
+
+        Assert.Equal(1, forks.Length)
+        let forker, forked = List.head forks
+        Assert.Equal({ File = 3; Rank = 1 }, forker)
+        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
 
     [<Fact>]
     let ``hangingSquares returns empty for an empty board`` () =
