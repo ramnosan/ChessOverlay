@@ -13,6 +13,7 @@ type OverlayWindow() as this =
     let arrowColor = Color.FromArgb(255, 210, 30, 30)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let hangingColor = Color.FromArgb(210, 255, 140, 0)
+    let enemyHangingColor = Color.FromArgb(220, 60, 210, 255)
     let forkColor = Color.FromArgb(230, 255, 215, 0)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
@@ -80,6 +81,7 @@ type OverlayWindow() as this =
                     Geometry = geometry
                     AttackArrows = []
                     HangingSquares = Set.empty
+                    EnemyHangingSquares = Set.empty
                     ForkSquares = Set.empty
                     DetectedPieces = None
                 }
@@ -114,6 +116,19 @@ type OverlayWindow() as this =
                 let inset = rect.Width * 0.1f
                 args.Graphics.DrawEllipse(
                     hangingPen,
+                    rect.X + inset,
+                    rect.Y + inset,
+                    rect.Width - 2.0f * inset,
+                    rect.Height - 2.0f * inset)
+
+            use enemyHangingPen = new Pen(enemyHangingColor, penWidth * 1.8f)
+            enemyHangingPen.DashStyle <- Drawing2D.DashStyle.Dash
+
+            for sq in current.EnemyHangingSquares do
+                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                let inset = rect.Width * 0.18f
+                args.Graphics.DrawEllipse(
+                    enemyHangingPen,
                     rect.X + inset,
                     rect.Y + inset,
                     rect.Width - 2.0f * inset,

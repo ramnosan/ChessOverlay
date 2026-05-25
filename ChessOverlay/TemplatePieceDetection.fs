@@ -244,6 +244,16 @@ module BackgroundIsolation =
 module SimilarityComparison =
     let private sampleSize = 32
 
+    type private GrayscaleSource =
+        {
+            OriginX: int
+            OriginY: int
+            Width: int
+            Height: int
+            Stride: int
+            Bytes: byte[]
+        }
+
     // Down to 32x32 the discriminative outline is barely a pixel wide, so an
     // integer offset search can never align it sub-pixel and a one-pixel board
     // misalignment destroys the correlation. A light blur widens those features
@@ -342,6 +352,91 @@ module SimilarityComparison =
             |> blur
         finally
             scaled.UnlockBits(data)
+
+    let private grayscaleAt (source: GrayscaleSource) x y =
+        let clampedX = min (source.OriginX + source.Width - 1) (max source.OriginX x)
+        let clampedY = min (source.OriginY + source.Height - 1) (max source.OriginY y)
+        let offset = (clampedY - source.OriginY) * source.Stride + (clampedX - source.OriginX) * 4
+        let b = float source.Bytes[offset]
+        let gr = float source.Bytes[offset + 1]
+        let r = float source.Bytes[offset + 2]
+        (r + gr + b) / 3.0
+
+    let private bilinearGrayscaleAt source x y =
+        let x0 = int (floor x)
+        let y0 = int (floor y)
+        let xWeight = x - float x0
+        let yWeight = y - float y0
+
+        let top =
+            grayscaleAt source x0 y0 * (1.0 - xWeight)
+            + grayscaleAt source (x0 + 1) y0 * xWeight
+
+        let bottom =
+            grayscaleAt source x0 (y0 + 1) * (1.0 - xWeight)
+            + grayscaleAt source (x0 + 1) (y0 + 1) * xWeight
+
+        top * (1.0 - yWeight) + bottom * yWeight
+
+    let private withGrayscaleSource (bitmap: Bitmap) (_geometry: BoardGeometry) action =
+        let bounds = Rectangle(0, 0, bitmap.Width, bitmap.Height)
+        let data = bitmap.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
+
+        try
+            let stride = abs data.Stride
+            let bytes = Array.zeroCreate<byte> (stride * bounds.Height)
+
+            for row in 0 .. bounds.Height - 1 do
+                Marshal.Copy(IntPtr.Add(data.Scan0, row * data.Stride), bytes, row * stride, stride)
+
+            action (
+                Some
+                    {
+                        OriginX = bounds.X
+                        OriginY = bounds.Y
+                        Width = bounds.Width
+                        Height = bounds.Height
+                        Stride = stride
+                        Bytes = bytes
+                    })
+        finally
+            bitmap.UnlockBits(data)
+
+    let private squareSampleBounds (bitmap: Bitmap) (geometry: BoardGeometry) (square: Square) =
+        let rect = geometry.GetSquareRectangle square
+        let x = int rect.X
+        let y = int rect.Y
+        let w = int rect.Width
+        let h = int rect.Height
+        let clampedX = max 0 x
+        let clampedY = max 0 y
+        let clampedW = min w (bitmap.Width - clampedX)
+        let clampedH = min h (bitmap.Height - clampedY)
+
+        if clampedW <= 0 || clampedH <= 0 then
+            None
+        else
+            Some(float clampedX, float clampedY, float clampedW, float clampedH)
+
+    let private toGrayscaleArrayFromSource source bitmap geometry square =
+        squareSampleBounds bitmap geometry square
+        |> Option.map (fun (left, top, width, height) ->
+            Array.init (sampleSize * sampleSize) (fun i ->
+                let sampleX = i % sampleSize
+                let sampleY = i / sampleSize
+                let sourceX = left + (float sampleX + 0.5) * width / float sampleSize - 0.5
+                let sourceY = top + (float sampleY + 0.5) * height / float sampleSize - 0.5
+                bilinearGrayscaleAt source sourceX sourceY)
+            |> blur)
+
+    let readSquareGrayscaleSamples (bitmap: Bitmap) (geometry: BoardGeometry) =
+        withGrayscaleSource bitmap geometry (function
+            | None -> []
+            | Some source ->
+                Squares.all
+                |> List.choose (fun square ->
+                    toGrayscaleArrayFromSource source bitmap geometry square
+                    |> Option.map (fun gray -> square, gray)))
 
     // A template is reduced to its grayscale samples plus a mask marking which
     // samples belong to the piece (vs the transparent/isolated background). The
@@ -619,12 +714,12 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, fieldTemplates: seq<Bit
                 let mutable candidates = Map.empty
                 let mutable matchCount = 0
 
-                for square in Squares.all do
-                    match PieceBitmap.extractSquareBitmap bitmap geometry square with
-                    | None -> ()
-                    | Some squareBmp ->
-                        use squareBmp = squareBmp
-                        let squareGray = SimilarityComparison.toGrayscaleArray squareBmp
+                for square, squareGray in SimilarityComparison.readSquareGrayscaleSamples bitmap geometry do
+                    let presenceScore = SimilarityComparison.piecePresenceScore squareGray
+
+                    if presenceScore < piecePresenceThreshold then
+                        candidates <- Map.add square [] candidates
+                    else
                         let rankedMatches = SimilarityComparison.rankMatches preparedTemplates squareGray
 
                         let squareCandidates =
@@ -649,8 +744,7 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, fieldTemplates: seq<Bit
                         match SimilarityComparison.tryAcceptBestCandidate threshold rankedMatches with
                         | Some(piece, score) when not isField ->
                             let presentEnough =
-                                SimilarityComparison.piecePresenceScore squareGray >= piecePresenceThreshold
-                                || score >= threshold
+                                presenceScore >= piecePresenceThreshold || score >= threshold
 
                             if presentEnough && not (SimilarityComparison.looksLikeMoveHintDot piece squareGray) then
                                 board <- Map.add square piece board

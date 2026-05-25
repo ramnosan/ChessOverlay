@@ -255,3 +255,34 @@ module AttackCalculatorTests =
         let hanging = AttackCalculator.hangingSquares board
 
         Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 } ], hanging)
+
+    [<Fact>]
+    let ``enemyHangingSquares returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyHangingSquares board)
+
+    [<Fact>]
+    let ``An undefended enemy piece attacked by the friendly player is hanging`` () =
+        // White rook on d1 attacks upward to the black rook on d5. The black
+        // rook is not defended by another black piece, so it is available.
+        let board = parse "8/8/8/3r4/8/8/8/3R4 w - - 0 1"
+        let hanging = AttackCalculator.enemyHangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 3 } ], hanging)
+
+    [<Fact>]
+    let ``A defended enemy piece attacked by the friendly player is not hanging`` () =
+        // The black rook on a5 defends the black rook on d5, so the d5 rook is
+        // not hanging even though the bottom player's rook attacks it.
+        let board = parse "8/8/8/r2r4/8/8/8/3R4 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.enemyHangingSquares board)
+
+    [<Fact>]
+    let ``A defended enemy piece is hanging when attacked by a lower-value friendly piece`` () =
+        // The black queen on e4 is defended by a black rook on a4, but the
+        // bottom player's knight attacks it, so the material trade is favorable.
+        let board = parse "8/8/8/8/r3q3/8/3N4/8 w - - 0 1"
+        let hanging = AttackCalculator.enemyHangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 4; Rank = 4 } ], hanging)

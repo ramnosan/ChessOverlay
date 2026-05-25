@@ -69,17 +69,20 @@ module AttackCalculator =
     let attackRaysForPiece board square piece : Square list list =
         attackRaysForPieceWithDir board square piece 1
 
-    let attacksForPiece board square piece =
-        attackRaysForPiece board square piece
+    let private attacksForPieceWithDir board square piece pawnRankDelta =
+        attackRaysForPieceWithDir board square piece pawnRankDelta
         |> List.concat
         |> Set.ofList
 
-    let attackedSquaresByColor (board: BoardState) color =
+    let attacksForPiece board square piece =
+        attacksForPieceWithDir board square piece 1
+
+    let private attackedSquaresByColorWithDir (board: BoardState) color pawnRankDelta =
         board
         |> Map.toSeq
         |> Seq.choose (fun (square, piece) ->
             if piece.Color = color then
-                Some(attacksForPiece board square piece)
+                Some(attacksForPieceWithDir board square piece pawnRankDelta)
             else
                 None)
         |> fun attacks ->
@@ -87,6 +90,9 @@ module AttackCalculator =
                 Set.empty
             else
                 Set.unionMany attacks
+
+    let attackedSquaresByColor (board: BoardState) color =
+        attackedSquaresByColorWithDir board color 1
 
     let private meanRank color (board: BoardState) =
         let ranks =
@@ -130,19 +136,6 @@ module AttackCalculator =
             |> Seq.collect (fun (square, piece) -> pieceArrows board square piece)
             |> Seq.toList
 
-    // Squares the friendly (bottom) player defends. Friendly pawns defend upward
-    // (rankDelta = -1), opposite the enemy pawns handled elsewhere.
-    let private friendlyDefendedSquares (board: BoardState) friendly : Set<Square> =
-        board
-        |> Map.toSeq
-        |> Seq.choose (fun (square, piece) ->
-            if piece.Color = friendly then
-                Some(attackRaysForPieceWithDir board square piece -1 |> List.concat |> Set.ofList)
-            else
-                None)
-        |> fun attacks ->
-            if Seq.isEmpty attacks then Set.empty else Set.unionMany attacks
-
     let private pieceValue piece =
         match piece.Kind with
         | Pawn -> 1
@@ -152,13 +145,27 @@ module AttackCalculator =
         | Queen -> 9
         | King -> 100
 
-    let private lowerValueEnemyAttacker board enemy square friendlyPiece =
+    let private lowerValueAttacker board attackerColor attackerPawnRankDelta square targetPiece =
         board
         |> Map.toSeq
         |> Seq.exists (fun (attackerSquare, attacker) ->
-            attacker.Color = enemy
-            && pieceValue friendlyPiece > pieceValue attacker
-            && Set.contains square (attacksForPiece board attackerSquare attacker))
+            attacker.Color = attackerColor
+            && pieceValue targetPiece > pieceValue attacker
+            && Set.contains square (attacksForPieceWithDir board attackerSquare attacker attackerPawnRankDelta))
+
+    let private hangingSquaresFor board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta =
+        let targetDefends = attackedSquaresByColorWithDir board targetColor targetPawnRankDelta
+        let attackerAttacks = attackedSquaresByColorWithDir board attackerColor attackerPawnRankDelta
+
+        board
+        |> Map.toSeq
+        |> Seq.filter (fun (square, piece) ->
+            piece.Color = targetColor
+            && Set.contains square attackerAttacks
+            && (not (Set.contains square targetDefends)
+                || lowerValueAttacker board attackerColor attackerPawnRankDelta square piece))
+        |> Seq.map fst
+        |> Set.ofSeq
 
     // Friendly (bottom) pieces that are attacked by the enemy and either not
     // defended by another friendly piece or attacked by a lower-value piece.
@@ -167,18 +174,16 @@ module AttackCalculator =
         | None -> Set.empty
         | Some enemy ->
             let friendly = if enemy = White then Black else White
-            let friendlyDefends = friendlyDefendedSquares board friendly
-            let enemyAttacks = attackedSquaresByColor board enemy
+            hangingSquaresFor board friendly -1 enemy 1
 
-            board
-            |> Map.toSeq
-            |> Seq.filter (fun (square, piece) ->
-                piece.Color = friendly
-                && Set.contains square enemyAttacks
-                && (not (Set.contains square friendlyDefends)
-                    || lowerValueEnemyAttacker board enemy square piece))
-            |> Seq.map fst
-            |> Set.ofSeq
+    // Enemy (top) pieces that are attacked by the friendly bottom player and
+    // either undefended or attacked by a lower-value friendly piece.
+    let enemyHangingSquares (board: BoardState) : Set<Square> =
+        match enemyColor board with
+        | None -> Set.empty
+        | Some enemy ->
+            let friendly = if enemy = White then Black else White
+            hangingSquaresFor board enemy 1 friendly -1
 
     // A fork is a single enemy (top) piece that attacks two or more *undefended*
     // friendly pieces at once. Defended pieces are excluded: if their defender
@@ -191,7 +196,7 @@ module AttackCalculator =
         | None -> []
         | Some enemy ->
             let friendly = if enemy = White then Black else White
-            let defended = friendlyDefendedSquares board friendly
+            let defended = attackedSquaresByColorWithDir board friendly -1
 
             let undefendedFriendly =
                 board

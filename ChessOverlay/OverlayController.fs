@@ -15,7 +15,7 @@ type OverlayController(
     ?timingEnabled: bool,
     ?scanIntervalMilliseconds: int) =
 
-    let scanInterval = defaultArg scanIntervalMilliseconds 750
+    let scanInterval = defaultArg scanIntervalMilliseconds 500
     let timingEnabled = defaultArg timingEnabled false
     let confidenceThreshold = 0.45
     let timer = new Timer(Interval = scanInterval)
@@ -100,6 +100,7 @@ type OverlayController(
                 | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
                     let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
                     let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
+                    let enemyHangingSquares = AttackCalculator.enemyHangingSquares boardReading.Board
 
                     let forkSquares =
                         AttackCalculator.enemyForks boardReading.Board
@@ -116,6 +117,7 @@ type OverlayController(
                                             Geometry = screenGeometry
                                             AttackArrows = attackArrows
                                             HangingSquares = hangingSquares
+                                            EnemyHangingSquares = enemyHangingSquares
                                             ForkSquares = forkSquares
                                             DetectedPieces = Some boardReading.Board
                                         }))
