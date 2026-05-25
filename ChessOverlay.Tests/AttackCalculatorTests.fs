@@ -362,3 +362,11 @@ module AttackCalculatorTests =
         let board = parse "8/8/5b2/8/3n3n/8/3N4/8 w - - 0 1"
 
         Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows does not flag a fork when all targets are defended (1.e4 d5 2.Qh5 Nf6 3.Qf3 dxe4 4.Qf4 Bg4)`` () =
+        // Real game position after 4...Bg4. The system was incorrectly reporting
+        // a fork next move even though every apparent target is defended (e.g.
+        // d2 is protected by the White queen on f4).
+        let board = parse "rn1qkb1r/ppp1pppp/5n2/8/4pQb1/8/PPPP1PPP/RNB1KBNR w KQkq - 2 5"
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)

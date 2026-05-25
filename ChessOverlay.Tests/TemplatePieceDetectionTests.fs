@@ -598,3 +598,44 @@ module TemplatePieceDetectionTests =
             | None -> failwith "Expected template reader output."
         finally
             disposeAllTemplates templates
+
+    [<Fact>]
+    let ``loadFieldTemplates returns empty when directory does not exist`` () =
+        let missing = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid().ToString("N"))
+        Assert.Empty(PieceTemplates.loadFieldTemplates missing)
+
+    [<Fact>]
+    let ``loadFieldTemplates returns empty when directory has no image files`` () =
+        let root = tempRoot ()
+        Assert.Empty(PieceTemplates.loadFieldTemplates root)
+
+    [<Fact>]
+    let ``loadFieldTemplates loads PNG files`` () =
+        let root = tempRoot ()
+        saveBitmap (Path.Combine(root, "field.png")) Color.Green
+        let result = PieceTemplates.loadFieldTemplates root
+        try
+            Assert.Equal(1, result.Length)
+        finally
+            result |> Array.iter (fun b -> b.Dispose())
+
+    [<Fact>]
+    let ``loadFieldTemplates loads BMP files`` () =
+        let root = tempRoot ()
+        saveBitmap (Path.Combine(root, "field.bmp")) Color.Blue
+        let result = PieceTemplates.loadFieldTemplates root
+        try
+            Assert.Equal(1, result.Length)
+        finally
+            result |> Array.iter (fun b -> b.Dispose())
+
+    [<Fact>]
+    let ``loadFieldTemplates loads both PNG and BMP files`` () =
+        let root = tempRoot ()
+        saveBitmap (Path.Combine(root, "field1.png")) Color.Green
+        saveBitmap (Path.Combine(root, "field2.bmp")) Color.Blue
+        let result = PieceTemplates.loadFieldTemplates root
+        try
+            Assert.Equal(2, result.Length)
+        finally
+            result |> Array.iter (fun b -> b.Dispose())

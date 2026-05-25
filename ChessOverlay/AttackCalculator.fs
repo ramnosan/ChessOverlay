@@ -193,23 +193,20 @@ module AttackCalculator =
         |> Seq.map fst
         |> Set.ofSeq
 
+    let private withEnemyColors board f =
+        match enemyColor board with
+        | None -> Set.empty
+        | Some enemy -> f enemy (if enemy = White then Black else White)
+
     // Friendly (bottom) pieces that are attacked by the enemy and either not
     // defended by another friendly piece or attacked by a lower-value piece.
     let hangingSquares (board: BoardState) : Set<Square> =
-        match enemyColor board with
-        | None -> Set.empty
-        | Some enemy ->
-            let friendly = if enemy = White then Black else White
-            hangingSquaresFor board friendly -1 enemy 1
+        withEnemyColors board (fun enemy friendly -> hangingSquaresFor board friendly -1 enemy 1)
 
     // Enemy (top) pieces that are attacked by the friendly bottom player and
     // either undefended or attacked by a lower-value friendly piece.
     let enemyHangingSquares (board: BoardState) : Set<Square> =
-        match enemyColor board with
-        | None -> Set.empty
-        | Some enemy ->
-            let friendly = if enemy = White then Black else White
-            hangingSquaresFor board enemy 1 friendly -1
+        withEnemyColors board (fun enemy friendly -> hangingSquaresFor board enemy 1 friendly -1)
 
     let private isOwnPiece board color square =
         match BoardState.tryPieceAt square board with

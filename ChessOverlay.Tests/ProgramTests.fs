@@ -130,3 +130,9 @@ module ProgramTests =
         Assert.True(demoWarning.IsNone)
         Assert.IsType<UncertainBoardReader>(defaultReader) |> ignore
         Assert.Equal(Some "No templates found in 'templates'", defaultWarning)
+
+    [<Fact>]
+    let ``save writes geometry that tryLoad reads back`` () =
+        let geometry = { Left = 42; Top = 99; Size = 512 }
+        BoardGeometryStorage.save geometry
+        Assert.Equal(Some geometry, BoardGeometryStorage.tryLoad())
