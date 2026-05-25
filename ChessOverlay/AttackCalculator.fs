@@ -1,54 +1,46 @@
 namespace ChessOverlay
 
 module AttackCalculator =
-    let private addIfValid file rank (attacks: Set<Square>) =
-        match Squares.tryCreate file rank with
-        | Some square -> Set.add square attacks
-        | None -> attacks
-
-    let private rayAttacks board square fileDelta rankDelta =
-        let rec loop file rank attacks =
+    // A ray is the ordered list of squares a piece reaches in a single
+    // direction, nearest first. Non-sliding pieces produce one single-square
+    // ray per target. Keeping the per-direction grouping lets us draw a single
+    // arrow to the farthest reachable square instead of one per square.
+    let private rayLine board square fileDelta rankDelta =
+        let rec loop file rank acc =
             match Squares.tryCreate file rank with
-            | None -> attacks
+            | None -> acc
             | Some target ->
-                let next = Set.add target attacks
+                let acc = target :: acc
 
                 if BoardState.occupied target board then
-                    next
+                    acc
                 else
-                    loop (file + fileDelta) (rank + rankDelta) next
+                    loop (file + fileDelta) (rank + rankDelta) acc
 
-        loop (square.File + fileDelta) (square.Rank + rankDelta) Set.empty
+        loop (square.File + fileDelta) (square.Rank + rankDelta) []
+        |> List.rev
+
+    let private steps deltas square =
+        deltas
+        |> List.choose (fun (fileDelta, rankDelta) ->
+            Squares.tryCreate (square.File + fileDelta) (square.Rank + rankDelta))
+        |> List.map List.singleton
 
     // Only the enemy (top) player's attacks are ever highlighted, and the top
     // player moves down the screen regardless of colour, so pawns always attack
     // toward increasing ranks here.
-    let private pawnAttacks square =
-        Set.empty
-        |> addIfValid (square.File - 1) (square.Rank + 1)
-        |> addIfValid (square.File + 1) (square.Rank + 1)
+    let private pawnRays square =
+        steps [ -1, 1; 1, 1 ] square
 
-    let private knightAttacks square =
-        [ -2, -1
-          -2, 1
-          -1, -2
-          -1, 2
-          1, -2
-          1, 2
-          2, -1
-          2, 1 ]
-        |> List.choose (fun (fileDelta, rankDelta) ->
-            Squares.tryCreate (square.File + fileDelta) (square.Rank + rankDelta))
-        |> Set.ofList
+    let private knightRays square =
+        steps [ -2, -1; -2, 1; -1, -2; -1, 2; 1, -2; 1, 2; 2, -1; 2, 1 ] square
 
-    let private kingAttacks square =
+    let private kingRays square =
         [ for rankDelta in -1 .. 1 do
               for fileDelta in -1 .. 1 do
                   if fileDelta <> 0 || rankDelta <> 0 then
                       fileDelta, rankDelta ]
-        |> List.choose (fun (fileDelta, rankDelta) ->
-            Squares.tryCreate (square.File + fileDelta) (square.Rank + rankDelta))
-        |> Set.ofList
+        |> fun deltas -> steps deltas square
 
     let private bishopDirections =
         [ -1, -1; -1, 1; 1, -1; 1, 1 ]
@@ -58,22 +50,24 @@ module AttackCalculator =
 
     let private queenDirections = bishopDirections @ rookDirections
 
-    let private slidingAttacks board square directions =
+    let private slidingRays board square directions =
         directions
-        |> List.map (fun (fileDelta, rankDelta) -> rayAttacks board square fileDelta rankDelta)
-        |> Set.unionMany
+        |> List.map (fun (fileDelta, rankDelta) -> rayLine board square fileDelta rankDelta)
+        |> List.filter (not << List.isEmpty)
+
+    let attackRaysForPiece board square piece : Square list list =
+        match piece.Kind with
+        | Pawn -> pawnRays square
+        | Knight -> knightRays square
+        | Bishop -> slidingRays board square bishopDirections
+        | Rook -> slidingRays board square rookDirections
+        | Queen -> slidingRays board square queenDirections
+        | King -> kingRays square
 
     let attacksForPiece board square piece =
-        Map.ofList [
-            Pawn, pawnAttacks
-            Knight, knightAttacks
-            Bishop, fun target -> slidingAttacks board target bishopDirections
-            Rook, fun target -> slidingAttacks board target rookDirections
-            Queen, fun target -> slidingAttacks board target queenDirections
-            King, kingAttacks
-        ]
-        |> Map.find piece.Kind
-        <| square
+        attackRaysForPiece board square piece
+        |> List.concat
+        |> Set.ofList
 
     let attackedSquaresByColor (board: BoardState) color =
         board
@@ -115,19 +109,19 @@ module AttackCalculator =
         | Some color -> attackedSquaresByColor board color
         | None -> Set.empty
 
+    // One arrow per direction a piece can move, ending at the farthest square
+    // it can see/attack along that ray.
     let enemyAttackArrows (board: BoardState) : (Square * Square) list =
         match enemyColor board with
         | None -> []
         | Some color ->
             board
             |> Map.toSeq
-            |> Seq.choose (fun (square, piece) ->
+            |> Seq.collect (fun (square, piece) ->
                 if piece.Color = color then
-                    attacksForPiece board square piece
-                    |> Set.toSeq
-                    |> Seq.map (fun target -> square, target)
-                    |> Some
+                    attackRaysForPiece board square piece
+                    |> List.choose (List.tryLast >> Option.map (fun farthest -> square, farthest))
+                    |> Seq.ofList
                 else
-                    None)
-            |> Seq.concat
+                    Seq.empty)
             |> Seq.toList

@@ -10,7 +10,7 @@ type OverlayWindow() as this =
     inherit Form()
 
     let transparentColor = Color.Magenta
-    let arrowColor = Color.FromArgb(255, 220, 40, 40)
+    let arrowColor = Color.FromArgb(160, 220, 40, 40)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let statusBackColor = Color.FromArgb(235, 24, 24, 24)
     let statusTextColor = Color.White
@@ -56,7 +56,10 @@ type OverlayWindow() as this =
 
     member _.ShowFrame(nextFrame: OverlayFrame) =
         frame <- Some nextFrame
-        let attackedCount = nextFrame.AttackArrows |> List.map snd |> List.distinct |> List.length
+        let attackedCount =
+            match nextFrame.DetectedPieces with
+            | Some board -> (AttackCalculator.enemyAttackedSquares board).Count
+            | None -> 0
         statusText <- sprintf "Board selected - %i attacked squares" attackedCount
         this.Invalidate()
 
@@ -84,9 +87,9 @@ type OverlayWindow() as this =
         match frame with
         | None -> this.PaintStatus args.Graphics
         | Some current ->
-            let penWidth = single current.Geometry.SquareSize * 0.09f
+            let penWidth = single current.Geometry.SquareSize * 0.06f
             use arrowPen = new Pen(arrowColor, penWidth)
-            arrowPen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(4.0f, 4.0f)
+            arrowPen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(3.5f, 3.5f)
             use outlinePen = new Pen(outlineColor, 3.0f)
 
             for (fromSq, toSq) in current.AttackArrows do
