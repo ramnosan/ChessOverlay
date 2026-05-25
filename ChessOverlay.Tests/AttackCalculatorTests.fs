@@ -286,3 +286,25 @@ module AttackCalculatorTests =
         let hanging = AttackCalculator.enemyHangingSquares board
 
         Assert.Equal<Set<Square>>(set [ { File = 4; Rank = 4 } ], hanging)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows reports a player move that forks two enemy pieces`` () =
+        // The bottom player's knight on d2 can move to f3, where it attacks
+        // the undefended black bishop on g5 and rook on d4.
+        let board = parse "8/8/8/6b1/3r4/8/3N4/8 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 3; Rank = 6 }, { File = 5; Rank = 5 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows ignores forks where enemy pieces are defended`` () =
+        // From f3 the knight would attack both black rooks, but the rooks
+        // defend each other along the fourth rank.
+        let board = parse "8/8/8/8/3r3r/8/3N4/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)

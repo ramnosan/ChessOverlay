@@ -11,6 +11,7 @@ type OverlayWindow() as this =
 
     let transparentColor = Color.Magenta
     let arrowColor = Color.FromArgb(255, 210, 30, 30)
+    let friendlyForkMoveColor = Color.FromArgb(255, 45, 135, 255)
     let outlineColor = Color.FromArgb(220, 255, 64, 64)
     let hangingColor = Color.FromArgb(210, 255, 140, 0)
     let enemyHangingColor = Color.FromArgb(220, 60, 210, 255)
@@ -80,6 +81,7 @@ type OverlayWindow() as this =
                 {
                     Geometry = geometry
                     AttackArrows = []
+                    FriendlyForkMoveArrows = []
                     HangingSquares = Set.empty
                     EnemyHangingSquares = Set.empty
                     ForkSquares = Set.empty
@@ -108,6 +110,16 @@ type OverlayWindow() as this =
                 let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
                 let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
                 args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
+
+            use friendlyForkMovePen = new Pen(friendlyForkMoveColor, penWidth * 1.4f)
+            friendlyForkMovePen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(3.8f, 3.8f)
+
+            for (fromSq, toSq) in current.FriendlyForkMoveArrows do
+                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                args.Graphics.DrawLine(friendlyForkMovePen, fromCenter, toCenter)
 
             use hangingPen = new Pen(hangingColor, penWidth * 1.8f)
 
