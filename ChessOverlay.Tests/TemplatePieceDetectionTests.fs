@@ -198,6 +198,39 @@ module TemplatePieceDetectionTests =
             disposeTemplates pieceImages
 
     [<Fact>]
+    let ``findBestMatch identifies a rendered piece against prepared templates`` () =
+        let pieceImages = loadPieceImages ()
+        let piece = { Color = White; Kind = Knight }
+
+        try
+            let prepared = SimilarityComparison.prepareTemplates (pieceImages |> Map.toSeq)
+            let squarePixels = 96
+            use square = new Bitmap(squarePixels, squarePixels)
+
+            (use graphics = Graphics.FromImage(square)
+             graphics.Clear(Color.FromArgb(119, 149, 86))
+             graphics.DrawImage(pieceImages[piece], Rectangle(0, 0, squarePixels, squarePixels)))
+
+            Assert.Equal(Some piece, SimilarityComparison.findBestMatch prepared square 0.35)
+        finally
+            disposeTemplates pieceImages
+
+    [<Fact>]
+    let ``findBestMatch rejects an empty square`` () =
+        let pieceImages = loadPieceImages ()
+
+        try
+            let prepared = SimilarityComparison.prepareTemplates (pieceImages |> Map.toSeq)
+            use square = new Bitmap(96, 96)
+
+            (use graphics = Graphics.FromImage(square)
+             graphics.Clear(Color.FromArgb(119, 149, 86)))
+
+            Assert.True((SimilarityComparison.findBestMatch prepared square 0.35).IsNone)
+        finally
+            disposeTemplates pieceImages
+
+    [<Fact>]
     let ``Template matcher accepts lower-scoring pawns before other pieces`` () =
         let pawn = { Color = White; Kind = Pawn }
         let knight = { Color = White; Kind = Knight }
