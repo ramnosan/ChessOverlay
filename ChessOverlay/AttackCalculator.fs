@@ -180,6 +180,11 @@ module AttackCalculator =
         else
             false
 
+    let private forkWorthyTarget attacker target =
+        target.Kind = King
+        || attacker.Kind = Pawn
+        || target.Kind <> Pawn
+
     let private hangingSquaresFor board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta =
         let attackerAttacks = attackedSquaresByColorWithDir board attackerColor attackerPawnRankDelta
 
@@ -253,6 +258,55 @@ module AttackCalculator =
         |> Map.remove fromSquare
         |> Map.add toSquare piece
 
+    let private kingSquare board color =
+        board
+        |> Map.toSeq
+        |> Seq.tryPick (fun (square, piece) ->
+            if piece.Color = color && piece.Kind = King then
+                Some square
+            else
+                None)
+
+    let private keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy =
+        let movedBoard = boardAfterMove board fromSquare toSquare piece
+
+        match kingSquare movedBoard friendly with
+        | None -> true
+        | Some king ->
+            not (Set.contains king (attackedSquaresByColorWithDir movedBoard enemy 1))
+
+    let private forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy =
+        let movedBoard = boardAfterMove board fromSquare toSquare piece
+
+        let givesCheck =
+            match kingSquare movedBoard enemy with
+            | None -> false
+            | Some enemyKing -> Set.contains enemyKing (attacksForPieceWithDir movedBoard toSquare piece -1)
+
+        let friendlyDefendsForkingPiece =
+            defendedAgainstAttackers movedBoard friendly -1 enemy 1 toSquare
+
+        let legalCaptureWinsForkingPiece (attackerSquare, attacker) =
+            if givesCheck && attacker.Kind <> King && piece.Kind <> Queen then
+                false
+            else
+                let boardAfterCapture =
+                    movedBoard
+                    |> Map.remove attackerSquare
+                    |> Map.add toSquare attacker
+
+                let leavesEnemyKingSafe =
+                    match kingSquare boardAfterCapture enemy with
+                    | None -> true
+                    | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture friendly -1))
+
+                leavesEnemyKingSafe
+                && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
+
+        piecesAttackingSquare movedBoard enemy 1 toSquare
+        |> Seq.exists legalCaptureWinsForkingPiece
+        |> not
+
     let private forkedVulnerableTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
@@ -262,6 +316,7 @@ module AttackCalculator =
             |> Seq.choose (fun (square, targetPiece) ->
                 if
                     targetPiece.Color = targetColor
+                    && forkWorthyTarget piece targetPiece
                     && (targetPiece.Kind = King
                         || not (
                             defendedAgainstAttackers
@@ -301,6 +356,8 @@ module AttackCalculator =
             |> Seq.filter (fun (_, piece) -> piece.Color = friendly)
             |> Seq.collect (fun (fromSquare, piece) ->
                 moveSquaresForPiece board fromSquare piece -1
+                |> Seq.filter (fun toSquare -> keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy)
+                |> Seq.filter (fun toSquare -> forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy)
                 |> Seq.choose (fun toSquare ->
                     let forked =
                         forkedVulnerableTargetsAfterMove board fromSquare toSquare piece enemy 1 -1

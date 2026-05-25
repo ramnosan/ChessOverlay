@@ -13,9 +13,9 @@
     <Compile Include="AttackCalculatorTests.fs" />
     <Compile Include="BoardReaderTests.fs" />
     <Compile Include="TemplatePieceDetectionTests.fs" />
-    <Compile Include="CrapMetricTests.fs" />
-    <Compile Include="DryDuplicationTests.fs" />
-    <Compile Include="ArchitectureViewTests.fs" />
+    <Compile Include="QualityTools\CrapMetricTests.fs" />
+    <Compile Include="QualityTools\DryDuplicationTests.fs" />
+    <Compile Include="QualityTools\ArchitectureViewTests.fs" />
     <Compile Include="ProgramTests.fs" />
     <Compile Include="BoardSelectionWindowTests.fs" />
   </ItemGroup>

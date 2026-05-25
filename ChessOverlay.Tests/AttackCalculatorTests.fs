@@ -162,9 +162,10 @@ module AttackCalculatorTests =
         Assert.Empty(AttackCalculator.enemyForks board)
 
     [<Fact>]
-    let ``enemyForks ignores defended pieces`` () =
-        // Black knight on d7 attacks both white rooks, but the rooks defend each
-        // other along the 5th rank, so neither is hanging — not a real fork.
+    let ``enemyForks ignores mutually defended equal value targets`` () =
+        // enemyForks reports only forks against hanging or profitably attacked
+        // pieces. These rooks defend each other along the 5th rank, so Nxc5 or
+        // Nxe5 would be recaptured by the other rook.
         let board = parse "8/3n4/8/2R1R3/8/8/8/8 w - - 0 1"
         Assert.Empty(AttackCalculator.enemyForks board)
 
@@ -356,6 +357,16 @@ module AttackCalculatorTests =
         Assert.DoesNotContain(({ File = 4; Rank = 6 }, { File = 2; Rank = 7 }), arrows)
 
     [<Fact>]
+    let ``friendlyForkMoveArrows does not report pseudo forks by absolutely pinned pieces`` () =
+        // Absolute pins cannot be premoved as fork tactics: moving this knight
+        // from e2 to f4 would attack d5 and h5, but it exposes the white king
+        // on e1 to the black rook on e8.
+        let board = parse "k3r3/8/8/3r3q/8/8/4N3/4K3 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 6 }, { File = 5; Rank = 4 }), arrows)
+
+    [<Fact>]
     let ``friendlyForkMoveArrows ignores defended equal-value targets`` () =
         // From f3 the knight would attack both black knights, but the bishop on
         // f6 defends both and the exchange is not favorable.
@@ -370,3 +381,72 @@ module AttackCalculatorTests =
         // d2 is protected by the White queen on f4).
         let board = parse "rn1qkb1r/ppp1pppp/5n2/8/4pQb1/8/PPPP1PPP/RNB1KBNR w KQkq - 2 5"
         Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows does not flag the same Bg4 position from black's board orientation`` () =
+        // Same position as above, but in the screen orientation used when the
+        // user plays black: White pieces are on the top and Black pieces are on
+        // the bottom. The apparent queen move Qxg4 must not become a fork hint.
+        let board = parse "RNBK1BNR/PPP1PPPP/8/1bQp4/8/2n5/pppp1ppp/r1bkq1nr w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Empty(arrows)
+        Assert.DoesNotContain(({ File = 4; Rank = 7 }, { File = 4; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows still rejects the flipped Bg4 queen check when the knight defender is missed`` () =
+        // Same screen position, but without the black knight on c6. This matches
+        // a realistic partial board read: even if a defender is missed, Qe7+
+        // is not a fork because the white king can take the unprotected queen.
+        let board = parse "RNBK1BNR/PPP1PPPP/8/1bQp4/8/8/pppp1ppp/r1bkq1nr w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 7 }, { File = 4; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects queen checks where the king can capture the forking queen`` () =
+        // Minimal version of the same bug: the bottom queen can move next to
+        // the top king and attack a rook, but the queen lands undefended and the
+        // checked king can capture it.
+        let board = parse "3K4/8/3R4/8/8/8/8/4q3 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 7 }, { File = 4; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects loose queen forks capturable by a bishop`` () =
+        // Qe4 would attack both loose rooks, but the bishop on b7 can simply
+        // take the queen on e4. The premove overlay should not suggest that as
+        // a fork.
+        let board = parse "8/1b6/8/8/r6r/8/8/4Q3 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 7 }, { File = 4; Rank = 4 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects defended queen forks when a lower value piece can take the queen`` () =
+        // The bishop on h1 protects e4, but Bxe4 would still trade a bishop for
+        // the queen, so the fork is not sound enough to show as a premove hint.
+        let board = parse "8/1b6/8/8/r6r/8/8/4Q2B w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 4; Rank = 7 }, { File = 4; Rank = 4 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects checking queen forks capturable by a bishop`` () =
+        // Screenshot regression: Qh7-d7+ would attack the king and rook, but
+        // the bishop on c8 can take the queen on d7 and win material.
+        let board = parse "rnb1kr2/ppp4Q/8/4N3/4B3/2P1B1P1/P1P2P1P/R3K2R w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 7; Rank = 1 }, { File = 3; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows allows queen checks when the forking queen is protected`` () =
+        // Same geometry as above, but a bottom bishop protects e7. The checked
+        // king can no longer safely capture the queen, so the queen fork remains
+        // a valid premove hint.
+        let board = parse "3K4/8/3R4/8/7b/8/8/4q3 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 4; Rank = 7 }, { File = 4; Rank = 1 }), arrows)
