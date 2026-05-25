@@ -123,6 +123,39 @@ module ArchitectureViewTests =
         Assert.All(model.Dependencies, fun dependency -> Assert.True(dependency.IsCycle))
 
     [<Fact>]
+    let ``Architecture analyzer ignores symbols in strings and comments`` () =
+        let root = tempRoot ()
+
+        writeProject root "ChessOverlay/ChessOverlay.fsproj" [ "Domain.fs"; "Analyzer.fs" ]
+
+        writeFile
+            root
+            "ChessOverlay/Domain.fs"
+            [
+                "namespace ChessOverlay"
+                "type Domain = { Name: string }"
+            ]
+        |> ignore
+
+        writeFile
+            root
+            "ChessOverlay/Analyzer.fs"
+            [
+                "namespace ChessOverlay"
+                "module Analyzer ="
+                "    // Domain appears in a comment, not in code."
+                "    let layerName = \"Domain\""
+                "    let template = \"\"\"Domain\"\"\""
+            ]
+        |> ignore
+
+        let model = ArchitectureView.analyze (options root)
+
+        Assert.DoesNotContain(
+            model.Dependencies,
+            fun dependency -> dependency.From.EndsWith("Analyzer.fs") && dependency.To.EndsWith("Domain.fs"))
+
+    [<Fact>]
     let ``Architecture HTML includes modules and dependency metadata`` () =
         let root = tempRoot ()
 
