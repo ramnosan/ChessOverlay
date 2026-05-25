@@ -93,6 +93,9 @@ type OverlayWindow() as this =
 
     override _.OnPaint(args) =
         base.OnPaint args
+        args.Graphics.CompositingQuality <- Drawing2D.CompositingQuality.HighQuality
+        args.Graphics.InterpolationMode <- Drawing2D.InterpolationMode.HighQualityBicubic
+        args.Graphics.PixelOffsetMode <- Drawing2D.PixelOffsetMode.HighQuality
         args.Graphics.SmoothingMode <- Drawing2D.SmoothingMode.AntiAlias
         args.Graphics.TextRenderingHint <- Text.TextRenderingHint.ClearTypeGridFit
 
@@ -101,7 +104,10 @@ type OverlayWindow() as this =
         | Some current ->
             let penWidth = single current.Geometry.SquareSize * 0.035f
             use arrowPen = new Pen(arrowColor, penWidth)
-            arrowPen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(3.5f, 3.5f)
+            use arrowCap = new Drawing2D.AdjustableArrowCap(3.5f, 3.5f, true)
+            arrowPen.StartCap <- Drawing2D.LineCap.Round
+            arrowPen.LineJoin <- Drawing2D.LineJoin.Round
+            arrowPen.CustomEndCap <- arrowCap
             use outlinePen = new Pen(outlineColor, 3.0f)
 
             for (fromSq, toSq) in current.AttackArrows do
@@ -112,7 +118,10 @@ type OverlayWindow() as this =
                 args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
 
             use friendlyForkMovePen = new Pen(friendlyForkMoveColor, penWidth * 1.4f)
-            friendlyForkMovePen.CustomEndCap <- new Drawing2D.AdjustableArrowCap(3.8f, 3.8f)
+            use friendlyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
+            friendlyForkMovePen.StartCap <- Drawing2D.LineCap.Round
+            friendlyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
+            friendlyForkMovePen.CustomEndCap <- friendlyForkMoveCap
 
             for (fromSq, toSq) in current.FriendlyForkMoveArrows do
                 let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
