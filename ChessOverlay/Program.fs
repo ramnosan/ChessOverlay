@@ -99,7 +99,12 @@ module Program =
     let private templatePath options =
         options.PieceTemplates |> Option.defaultValue "templates"
 
-    let private defaultSimilarityThreshold = 0.75
+    // Matching compares only the isolated piece (not its square background), and
+    // the score is further scaled by how well the piece contrasts match. Correct
+    // pieces sit well above empty/wrong squares (which stay near zero), so the
+    // acceptance bar is much lower than whole-square correlation; this value also
+    // leaves headroom for the few-pixel misalignment of a hand-selected board.
+    let private defaultSimilarityThreshold = 0.35
 
     let private createTemplateReader templatesPath =
         let templates = PieceTemplates.loadAllFromDirectory templatesPath

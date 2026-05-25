@@ -18,21 +18,6 @@ module TemplatePieceDetectionTests =
         graphics.Clear color
         bitmap.Save(path)
 
-    let private patternedSquare size =
-        let bitmap = new Bitmap(size, size)
-
-        for x in 0 .. size - 1 do
-            for y in 0 .. size - 1 do
-                let color =
-                    if x = y || x + y = size - 1 then
-                        Color.White
-                    else
-                        Color.Black
-
-                bitmap.SetPixel(x, y, color)
-
-        bitmap
-
     let private disposeTemplates (templates: Map<Piece, Bitmap>) =
         templates
         |> Map.iter (fun _ bitmap -> bitmap.Dispose())
@@ -72,41 +57,49 @@ module TemplatePieceDetectionTests =
             sprintf "%s expected=%s candidates=[%s]" (Squares.name square) (pieceNotation expectedPiece) candidates)
         |> String.concat "; "
 
-    let private drawStartingPositionBoard size =
-        let bitmap = new Bitmap(size, size)
+    // The real isolated piece artwork (transparent background) is composited
+    // onto synthetic boards so detection is exercised against genuine piece
+    // silhouettes with their dark outline, not stand-in glyphs.
+    let private loadPieceImages () : Map<Piece, Bitmap> =
+        PieceTemplates.loadFromDirectory (fixturePath "templates")
+
+    let private fillSquares (graphics: Graphics) size (highlights: Set<Square>) =
         let squareSize = size / 8
-        use graphics = Graphics.FromImage(bitmap)
         use lightBrush = new SolidBrush(Color.FromArgb(235, 236, 208))
         use darkBrush = new SolidBrush(Color.FromArgb(119, 149, 86))
-        use blackBrush = new SolidBrush(Color.FromArgb(75, 75, 75))
-        use whiteBrush = new SolidBrush(Color.White)
         use highlightBrush = new SolidBrush(Color.FromArgb(150, 215, 170, 120))
-        use pieceFont = new Font(FontFamily.GenericSansSerif, single squareSize * 0.58f, FontStyle.Bold, GraphicsUnit.Pixel)
 
         for rank in 0 .. 7 do
             for file in 0 .. 7 do
-                let brush =
-                    if (rank + file) % 2 = 0 then
-                        lightBrush
-                    else
-                        darkBrush
-
+                let brush = if (rank + file) % 2 = 0 then lightBrush else darkBrush
                 graphics.FillRectangle(brush, file * squareSize, rank * squareSize, squareSize, squareSize)
 
-        graphics.FillRectangle(highlightBrush, 4 * squareSize, 4 * squareSize, squareSize, squareSize)
+        for square in highlights do
+            graphics.FillRectangle(highlightBrush, square.File * squareSize, square.Rank * squareSize, squareSize, squareSize)
 
-        match Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
-        | Error message -> failwith message
-        | Ok board ->
-            for KeyValue(square, piece) in board do
-                let text = pieceNotation piece
-                let textSize = graphics.MeasureString(text, pieceFont)
-                let x = single (square.File * squareSize) + (single squareSize - textSize.Width) / 2.0f
-                let y = single (square.Rank * squareSize) + (single squareSize - textSize.Height) / 2.0f
-                let brush = if piece.Color = Top then blackBrush else whiteBrush
-                graphics.DrawString(text, pieceFont, brush, x, y)
+    let private drawBoardFromFen (fen: string) size (highlights: Set<Square>) =
+        let bitmap = new Bitmap(size, size)
+        let squareSize = size / 8
+        use graphics = Graphics.FromImage(bitmap)
+        fillSquares graphics size highlights
+        let pieceImages = loadPieceImages ()
+
+        try
+            match Fen.parseBoard fen with
+            | Error message -> failwith message
+            | Ok board ->
+                for KeyValue(square, piece) in board do
+                    match Map.tryFind piece pieceImages with
+                    | Some image ->
+                        graphics.DrawImage(image, Rectangle(square.File * squareSize, square.Rank * squareSize, squareSize, squareSize))
+                    | None -> failwithf "Missing piece image for %A" piece
+        finally
+            disposeTemplates pieceImages
 
         bitmap
+
+    let private drawStartingPositionBoard size =
+        drawBoardFromFen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" size (Set.singleton { File = 4; Rank = 4 })
 
     let private drawEmptyBoard size =
         let bitmap = new Bitmap(size, size)
@@ -148,27 +141,61 @@ module TemplatePieceDetectionTests =
             disposeTemplates templates
 
     [<Fact>]
-    let ``Template reader matches a patterned piece square`` () =
-        use templateBitmap = patternedSquare 16
-        use boardBitmap = new Bitmap(128, 128)
-
-        use graphics = Graphics.FromImage(boardBitmap)
-        graphics.Clear Color.Black
-        graphics.DrawImage(templateBitmap, Rectangle(0, 0, 16, 16))
-
+    let ``Template reader matches a single real piece square`` () =
+        let pieceImages = loadPieceImages ()
         let piece = { Color = Bottom; Kind = King }
-        let templates = Map.ofList [ piece, templateBitmap ]
-        let reader = TemplateBoardReader(templates, 0.9) :> IBoardReader
-        let geometry = { Left = 0; Top = 0; Size = 128 }
 
-        match reader.Read(boardBitmap, geometry) with
-        | Some reading ->
-            Assert.Equal(0.5, reading.Confidence)
-            Assert.Equal(Some piece, BoardState.tryPieceAt { File = 0; Rank = 0 } reading.Board)
-            let candidates = Map.find { File = 0; Rank = 0 } reading.Candidates
-            Assert.Equal(piece, candidates.Head.Piece)
-            Assert.True(candidates.Head.Score >= 0.9)
-        | None -> failwith "Expected template reader output."
+        try
+            // White king alone on a1.
+            use boardBitmap = drawBoardFromFen "8/8/8/8/8/8/8/K7" 256 Set.empty
+            let reader = TemplateBoardReader(Map.ofList [ piece, pieceImages[piece] ], 0.35) :> IBoardReader
+            let geometry = { Left = 0; Top = 0; Size = 256 }
+
+            match reader.Read(boardBitmap, geometry) with
+            | Some reading ->
+                Assert.Equal(0.5, reading.Confidence)
+                Assert.Equal(Some piece, BoardState.tryPieceAt { File = 0; Rank = 7 } reading.Board)
+                let candidates = Map.find { File = 0; Rank = 7 } reading.Candidates
+                Assert.Equal(piece, candidates.Head.Piece)
+                Assert.True(candidates.Head.Score >= 0.4)
+            | None -> failwith "Expected template reader output."
+        finally
+            disposeTemplates pieceImages
+
+    [<Fact>]
+    let ``Detection ignores the square background colour`` () =
+        let pieceImages = loadPieceImages ()
+        let piece = { Color = Bottom; Kind = Knight }
+
+        try
+            let knight = pieceImages[piece]
+            let reader = TemplateBoardReader(Map.ofList [ piece, knight ], 0.35) :> IBoardReader
+            let squarePixels = 96
+            // The geometry treats the whole bitmap as a single square.
+            let geometry = { Left = 0; Top = 0; Size = squarePixels * 8 }
+
+            // The template was isolated from a green square; the piece must still
+            // be recognised on backgrounds that differ wildly from that.
+            let backgrounds =
+                [ Color.FromArgb(119, 149, 86) // original green dark square
+                  Color.FromArgb(235, 236, 208) // light square
+                  Color.FromArgb(181, 136, 99) // brown theme
+                  Color.FromArgb(200, 40, 40) // nothing like a board at all
+                  Color.FromArgb(40, 40, 200) ]
+
+            for background in backgrounds do
+                use square = new Bitmap(squarePixels, squarePixels)
+
+                (use graphics = Graphics.FromImage(square)
+                 graphics.Clear background
+                 graphics.DrawImage(knight, Rectangle(0, 0, squarePixels, squarePixels)))
+
+                match reader.Read(square, geometry) with
+                | Some reading ->
+                    Assert.Equal(Some piece, BoardState.tryPieceAt { File = 0; Rank = 0 } reading.Board)
+                | None -> failwithf "Expected detection on background %A" background
+        finally
+            disposeTemplates pieceImages
 
     [<Fact>]
     let ``Template matcher accepts lower-scoring pawns before other pieces`` () =
@@ -222,22 +249,24 @@ module TemplatePieceDetectionTests =
             disposeTemplates templates
 
     [<Fact>]
-    let ``Template reader detects all pieces on a starting-position board`` () =
+    let ``Template reader detects all pieces from freshly calibrated templates`` () =
+        // Calibrate templates from a real screenshot and detect that same board:
+        // exercises the calibrate-then-read flow end to end on genuine artwork.
         let root = tempRoot ()
-        use bitmap = drawStartingPositionBoard 800
-        let geometry = { Left = 0; Top = 0; Size = 800 }
+        use bitmap = new Bitmap(fixturePath "chess_screenshot_starting position.png")
+        let geometry = { Left = 0; Top = 0; Size = bitmap.Width }
         let savedCount = PieceTemplateCalibration.saveStartingPositionTemplates bitmap geometry root
         let templates = PieceTemplates.loadAllFromDirectory root
 
         try
-            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
 
             match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
             | Some reading, Ok expected ->
                 Assert.Equal(32, savedCount)
                 Assert.Equal(32, templates.Length)
                 Assert.Equal(1.0, reading.Confidence)
-                Assert.Equal<BoardState>(expected, reading.Board)
+                Assert.True((expected = reading.Board), candidateSummary reading expected)
             | None, _ -> failwith "Expected template reader output."
             | _, Error message -> failwith message
         finally
@@ -250,7 +279,7 @@ module TemplatePieceDetectionTests =
         let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
 
         try
-            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
 
             match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
             | Some reading, Ok expected ->
@@ -269,11 +298,32 @@ module TemplatePieceDetectionTests =
         let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
 
         try
-            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
 
             match reader.Read(bitmap, geometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
             | Some reading, Ok expected ->
                 Assert.Equal(32, templates.Length)
+                Assert.Equal(1.0, reading.Confidence)
+                Assert.True((expected = reading.Board), candidateSummary reading expected)
+            | None, _ -> failwith "Expected template reader output."
+            | _, Error message -> failwith message
+        finally
+            disposeAllTemplates templates
+
+    [<Fact>]
+    let ``Template reader tolerates a few pixels of board misalignment`` () =
+        // The committed templates were calibrated from this exact screenshot, so
+        // reading it back with the geometry shifted a few pixels mimics imperfect
+        // manual board selection.
+        use bitmap = new Bitmap(fixturePath "chess_screenshot_starting position.png")
+        let templates = PieceTemplates.loadAllFromDirectory(fixturePath "templates")
+
+        try
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
+            let misalignedGeometry = { Left = 3; Top = 3; Size = bitmap.Width }
+
+            match reader.Read(bitmap, misalignedGeometry), Fen.parseBoard "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR" with
+            | Some reading, Ok expected ->
                 Assert.Equal(1.0, reading.Confidence)
                 Assert.True((expected = reading.Board), candidateSummary reading expected)
             | None, _ -> failwith "Expected template reader output."
@@ -291,7 +341,7 @@ module TemplatePieceDetectionTests =
         let templates = PieceTemplates.loadAllFromDirectory root
 
         try
-            let reader = TemplateBoardReader(templates, 0.75) :> IBoardReader
+            let reader = TemplateBoardReader(templates, 0.35) :> IBoardReader
 
             match reader.Read(emptyBitmap, geometry) with
             | Some reading ->
