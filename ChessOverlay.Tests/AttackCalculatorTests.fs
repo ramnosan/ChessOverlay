@@ -204,6 +204,24 @@ module AttackCalculatorTests =
         Assert.Empty(AttackCalculator.hangingSquares board)
 
     [<Fact>]
+    let ``A friendly piece defended only by the king is not hanging when the attacker is loose`` () =
+        // Black queen on d8 attacks the white rook on d3. The white king on e2
+        // can recapture on d3 if the queen takes because no black piece protects d3.
+        let board = parse "3q4/8/8/8/8/3R4/4K3/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.hangingSquares board)
+
+    [<Fact>]
+    let ``A friendly piece defended only by the king is hanging when a protected attacker can take it`` () =
+        // The white king defends the rook on d3, but black's queen and rook both
+        // attack d3. After either capture, the other black piece protects d3, so
+        // the king cannot legally recapture.
+        let board = parse "3q4/8/8/8/8/r2R4/4K3/8 w - - 0 1"
+        let hanging = AttackCalculator.hangingSquares board
+
+        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 } ], hanging)
+
+    [<Fact>]
     let ``A defended friendly piece is hanging when attacked by a lower-value enemy piece`` () =
         // Black knight on d7 attacks the white queen on e5. The queen is defended
         // by the rook on a5, but trading a knight for a queen still wins material.
@@ -286,3 +304,25 @@ module AttackCalculatorTests =
         let hanging = AttackCalculator.enemyHangingSquares board
 
         Assert.Equal<Set<Square>>(set [ { File = 4; Rank = 4 } ], hanging)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows reports a player move that forks two enemy pieces`` () =
+        // The bottom player's knight on d2 can move to f3, where it attacks
+        // the undefended black bishop on g5 and rook on d4.
+        let board = parse "8/8/8/6b1/3r4/8/3N4/8 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.Contains(({ File = 3; Rank = 6 }, { File = 5; Rank = 5 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows ignores forks where enemy pieces are defended`` () =
+        // From f3 the knight would attack both black rooks, but the rooks
+        // defend each other along the fourth rank.
+        let board = parse "8/8/8/8/3r3r/8/3N4/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)

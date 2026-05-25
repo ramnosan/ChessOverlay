@@ -34,6 +34,9 @@ module AttackCalculator =
     // toward increasing ranks here.
     let private pawnRays square = pawnRaysWithDir 1 square
 
+    let private oppositeColor color =
+        if color = White then Black else White
+
     let private knightRays square =
         steps [ -2, -1; -2, 1; -1, -2; -1, 2; 1, -2; 1, 2; 2, -1; 2, 1 ] square
 
@@ -145,16 +148,39 @@ module AttackCalculator =
         | Queen -> 9
         | King -> 100
 
-    let private lowerValueAttacker board attackerColor attackerPawnRankDelta square targetPiece =
+    let private piecesAttackingSquare board attackerColor attackerPawnRankDelta square =
         board
         |> Map.toSeq
-        |> Seq.exists (fun (attackerSquare, attacker) ->
+        |> Seq.filter (fun (attackerSquare, attacker) ->
             attacker.Color = attackerColor
-            && pieceValue targetPiece > pieceValue attacker
             && Set.contains square (attacksForPieceWithDir board attackerSquare attacker attackerPawnRankDelta))
+        |> Seq.toList
+
+    let private lowerValueAttacker board attackerColor attackerPawnRankDelta square targetPiece =
+        piecesAttackingSquare board attackerColor attackerPawnRankDelta square
+        |> Seq.exists (fun (_, attacker) -> pieceValue targetPiece > pieceValue attacker)
+
+    let private protectedAfterCapture board attackerColor attackerPawnRankDelta targetSquare attackerSquare attacker =
+        let boardAfterCapture =
+            board
+            |> Map.remove attackerSquare
+            |> Map.add targetSquare attacker
+
+        Set.contains targetSquare (attackedSquaresByColorWithDir boardAfterCapture attackerColor attackerPawnRankDelta)
+
+    let private defendedAgainstAttackers board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta square =
+        let defenders = piecesAttackingSquare board targetColor targetPawnRankDelta square
+
+        if defenders |> Seq.exists (fun (_, defender) -> defender.Kind <> King) then
+            true
+        elif defenders |> Seq.exists (fun (_, defender) -> defender.Kind = King) then
+            piecesAttackingSquare board attackerColor attackerPawnRankDelta square
+            |> Seq.forall (fun (attackerSquare, attacker) ->
+                not (protectedAfterCapture board attackerColor attackerPawnRankDelta square attackerSquare attacker))
+        else
+            false
 
     let private hangingSquaresFor board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta =
-        let targetDefends = attackedSquaresByColorWithDir board targetColor targetPawnRankDelta
         let attackerAttacks = attackedSquaresByColorWithDir board attackerColor attackerPawnRankDelta
 
         board
@@ -162,7 +188,7 @@ module AttackCalculator =
         |> Seq.filter (fun (square, piece) ->
             piece.Color = targetColor
             && Set.contains square attackerAttacks
-            && (not (Set.contains square targetDefends)
+            && (not (defendedAgainstAttackers board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta square)
                 || lowerValueAttacker board attackerColor attackerPawnRankDelta square piece))
         |> Seq.map fst
         |> Set.ofSeq
@@ -184,6 +210,102 @@ module AttackCalculator =
         | Some enemy ->
             let friendly = if enemy = White then Black else White
             hangingSquaresFor board enemy 1 friendly -1
+
+    let private isOwnPiece board color square =
+        match BoardState.tryPieceAt square board with
+        | Some piece -> piece.Color = color
+        | None -> false
+
+    let private isOpponentPiece board color square =
+        match BoardState.tryPieceAt square board with
+        | Some piece -> piece.Color = oppositeColor color
+        | None -> false
+
+    let private pawnMoveSquares board square color pawnRankDelta =
+        let oneStep =
+            Squares.tryCreate square.File (square.Rank + pawnRankDelta)
+            |> Option.filter (fun target -> not (BoardState.occupied target board))
+
+        let startRank = if pawnRankDelta = -1 then 6 else 1
+
+        let twoStep =
+            match oneStep with
+            | Some _ when square.Rank = startRank ->
+                Squares.tryCreate square.File (square.Rank + pawnRankDelta * 2)
+                |> Option.filter (fun target -> not (BoardState.occupied target board))
+            | _ -> None
+
+        let captures =
+            [ -1; 1 ]
+            |> List.choose (fun fileDelta ->
+                Squares.tryCreate (square.File + fileDelta) (square.Rank + pawnRankDelta)
+                |> Option.filter (isOpponentPiece board color))
+
+        [ oneStep; twoStep ] |> List.choose id |> List.append captures
+
+    let private moveSquaresForPiece board square piece pawnRankDelta =
+        match piece.Kind with
+        | Pawn -> pawnMoveSquares board square piece.Color pawnRankDelta
+        | _ ->
+            attackRaysForPieceWithDir board square piece pawnRankDelta
+            |> List.concat
+            |> List.filter (not << isOwnPiece board piece.Color)
+
+    let private boardAfterMove board fromSquare toSquare piece =
+        board
+        |> Map.remove fromSquare
+        |> Map.add toSquare piece
+
+    let private forkedUndefendedTargetsAfterMove board fromSquare toSquare piece targetColor targetPawnRankDelta attackerPawnRankDelta =
+        let movedBoard = boardAfterMove board fromSquare toSquare piece
+
+        let undefendedTargets =
+            movedBoard
+            |> Map.toSeq
+            |> Seq.choose (fun (square, targetPiece) ->
+                if
+                    targetPiece.Color = targetColor
+                    && not (
+                        defendedAgainstAttackers
+                            movedBoard
+                            targetColor
+                            targetPawnRankDelta
+                            piece.Color
+                            attackerPawnRankDelta
+                            square
+                    )
+                then
+                    Some square
+                else
+                    None)
+            |> Set.ofSeq
+
+        Set.intersect (attacksForPieceWithDir movedBoard toSquare piece attackerPawnRankDelta) undefendedTargets
+
+    // One-move fork opportunities for the friendly bottom player. Each result
+    // is an arrow from the current square to the square where the move would
+    // attack two or more undefended enemy pieces.
+    let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
+        match enemyColor board with
+        | None -> []
+        | Some enemy ->
+            let friendly = oppositeColor enemy
+
+            board
+            |> Map.toSeq
+            |> Seq.filter (fun (_, piece) -> piece.Color = friendly)
+            |> Seq.collect (fun (fromSquare, piece) ->
+                moveSquaresForPiece board fromSquare piece -1
+                |> Seq.choose (fun toSquare ->
+                    let forked =
+                        forkedUndefendedTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
+
+                    if Set.count forked >= 2 then
+                        Some(fromSquare, toSquare)
+                    else
+                        None))
+            |> Seq.distinct
+            |> Seq.toList
 
     // A fork is a single enemy (top) piece that attacks two or more *undefended*
     // friendly pieces at once. Defended pieces are excluded: if their defender
