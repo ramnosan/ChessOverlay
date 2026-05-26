@@ -280,6 +280,14 @@ module SimilarityComparison =
 
     let private blur (src: float[]) : float[] = blurOnce src
 
+    let private kernelWeight dx dy =
+        if dx = 0 && dy = 0 then 4.0
+        elif dx = 0 || dy = 0 then 2.0
+        else 1.0
+
+    let private isValidSampleIndex nx ny =
+        nx >= 0 && nx < sampleSize && ny >= 0 && ny < sampleSize
+
     let private kernelBlurWeight (src: float[]) (mask: bool[]) x y =
         let mutable sum = 0.0
         let mutable weight = 0.0
@@ -288,10 +296,10 @@ module SimilarityComparison =
             for dx in -1 .. 1 do
                 let nx = x + dx
                 let ny = y + dy
-                if nx >= 0 && nx < sampleSize && ny >= 0 && ny < sampleSize then
+                if isValidSampleIndex nx ny then
                     let ni = ny * sampleSize + nx
                     if mask[ni] then
-                        let w = if dx = 0 && dy = 0 then 4.0 elif dx = 0 || dy = 0 then 2.0 else 1.0
+                        let w = kernelWeight dx dy
                         sum <- sum + w * src[ni]
                         weight <- weight + w
 
@@ -308,6 +316,12 @@ module SimilarityComparison =
 
         result
 
+    let private isInteriorCoord x y =
+        x > 0 && x < sampleSize - 1 && y > 0 && y < sampleSize - 1
+
+    let private hasAllFourNeighboursMasked (mask: bool[]) i =
+        mask[i - 1] && mask[i + 1] && mask[i - sampleSize] && mask[i + sampleSize]
+
     // Drop the one-pixel rim of the mask. Blur mixes those edge samples with the
     // surrounding board, so excluding them keeps the comparison on clean piece
     // interior and removes the last of the background's influence.
@@ -318,11 +332,7 @@ module SimilarityComparison =
             for x in 0 .. sampleSize - 1 do
                 let i = y * sampleSize + x
                 if mask[i] then
-                    let inside =
-                        x > 0 && x < sampleSize - 1 && y > 0 && y < sampleSize - 1
-                        && mask[i - 1] && mask[i + 1]
-                        && mask[i - sampleSize] && mask[i + sampleSize]
-                    result[i] <- inside
+                    result[i] <- isInteriorCoord x y && hasAllFourNeighboursMasked mask i
 
         result
 

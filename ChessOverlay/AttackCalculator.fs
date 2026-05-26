@@ -180,10 +180,7 @@ module AttackCalculator =
         else
             false
 
-    let private forkWorthyTarget attacker target =
-        target.Kind = King
-        || attacker.Kind = Pawn
-        || target.Kind <> Pawn
+    let private forkWorthyTarget _attacker _target = true
 
     let private hangingSquaresFor board targetColor targetPawnRankDelta attackerColor attackerPawnRankDelta =
         let attackerAttacks = attackedSquaresByColorWithDir board attackerColor attackerPawnRankDelta
@@ -265,40 +262,41 @@ module AttackCalculator =
             else
                 None)
 
-    let private keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy =
+    let private kingSafeAfterMove board fromSquare toSquare piece kingSide attackerColor attackerPawnDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
-        match kingSquare movedBoard friendly with
+        match kingSquare movedBoard kingSide with
         | None -> true
         | Some king ->
-            not (Set.contains king (attackedSquaresByColorWithDir movedBoard enemy 1))
+            not (Set.contains king (attackedSquaresByColorWithDir movedBoard attackerColor attackerPawnDelta))
 
-    let private enemyKingSafeAfterCapture boardAfterCapture enemy friendly =
-        match kingSquare boardAfterCapture enemy with
+    let private kingSafeAfterCapture boardAfterCapture kingSide attackerColor attackerPawnDelta =
+        match kingSquare boardAfterCapture kingSide with
         | None -> true
-        | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture friendly -1))
+        | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture attackerColor attackerPawnDelta))
 
-    let private legalCaptureWinsForkingPiece movedBoard toSquare piece friendly enemy friendlyDefendsForkingPiece (attackerSquare, attacker) =
+    let private legalCaptureWinsForForker movedBoard toSquare piece capturerColor forkerColor forkerPawnDelta forkerDefendsSquare (attackerSquare, attacker) =
         let boardAfterCapture =
             movedBoard
             |> Map.remove attackerSquare
             |> Map.add toSquare attacker
 
-        enemyKingSafeAfterCapture boardAfterCapture enemy friendly
-        && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
+        kingSafeAfterCapture boardAfterCapture capturerColor forkerColor forkerPawnDelta
+        && (not forkerDefendsSquare || pieceValue piece > pieceValue attacker)
 
-    let private forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy =
+    let private pieceIsSafeAfterMove board fromSquare toSquare piece forkerColor forkerPawnDelta capturerColor capturerPawnDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
 
-        piecesAttackingSquare movedBoard enemy 1 toSquare
+        piecesAttackingSquare movedBoard capturerColor capturerPawnDelta toSquare
         |> Seq.exists (
-            legalCaptureWinsForkingPiece
+            legalCaptureWinsForForker
                 movedBoard
                 toSquare
                 piece
-                friendly
-                enemy
-                (defendedAgainstAttackers movedBoard friendly -1 enemy 1 toSquare)
+                capturerColor
+                forkerColor
+                forkerPawnDelta
+                (defendedAgainstAttackers movedBoard forkerColor forkerPawnDelta capturerColor capturerPawnDelta toSquare)
         )
         |> not
 
@@ -321,26 +319,29 @@ module AttackCalculator =
 
         Set.intersect (attacksForPieceWithDir movedBoard toSquare piece attackerPawnRankDelta) vulnerableTargets
 
-    let private forkMoveArrowsForPiece board fromSquare piece friendly enemy =
-        moveSquaresForPiece board fromSquare piece -1
-        |> Seq.filter (fun toSquare -> keepsKingSafeAfterMove board fromSquare toSquare piece friendly enemy)
-        |> Seq.filter (fun toSquare -> forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy)
+    let private forkMoveArrowsForPiece board fromSquare piece ownColor ownPawnDelta opponentColor opponentPawnDelta =
+        moveSquaresForPiece board fromSquare piece ownPawnDelta
+        |> Seq.filter (fun toSquare -> kingSafeAfterMove board fromSquare toSquare piece ownColor opponentColor opponentPawnDelta)
+        |> Seq.filter (fun toSquare -> pieceIsSafeAfterMove board fromSquare toSquare piece ownColor ownPawnDelta opponentColor opponentPawnDelta)
         |> Seq.choose (fun toSquare ->
-            let forked =
-                forkedVulnerableTargetsAfterMove board fromSquare toSquare piece enemy 1 -1
+            let forked = forkedVulnerableTargetsAfterMove board fromSquare toSquare piece opponentColor opponentPawnDelta ownPawnDelta
+            if Set.count forked >= 2 then Some(fromSquare, toSquare) else None)
 
-            if Set.count forked >= 2 then
-                Some(fromSquare, toSquare)
-            else
-                None)
-
-    let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
+    let private forkMoveArrowsCore board pickOwn =
         withEnemyColor board (fun enemy ->
             let friendly = oppositeColor enemy
-            piecesOfColor board friendly
-            |> Seq.collect (fun (fromSquare, piece) -> forkMoveArrowsForPiece board fromSquare piece friendly enemy)
+            let ownColor = pickOwn enemy friendly
+            let opponentColor = oppositeColor ownColor
+            let ownPawnDelta = if ownColor = enemy then 1 else -1
+            let opponentPawnDelta = -ownPawnDelta
+            piecesOfColor board ownColor
+            |> Seq.collect (fun (fromSquare, piece) ->
+                forkMoveArrowsForPiece board fromSquare piece ownColor ownPawnDelta opponentColor opponentPawnDelta)
             |> Seq.distinct
             |> Seq.toList)
+
+    let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
+        forkMoveArrowsCore board (fun _ f -> f)
 
     // A fork is a single enemy (top) piece that attacks two or more *undefended*
     // friendly pieces at once. Defended pieces are excluded: if their defender
@@ -379,38 +380,5 @@ module AttackCalculator =
         |> Option.map (enemyForksForColor board)
         |> Option.defaultValue []
 
-    let private enemyForkMoveArrowsForPiece board fromSquare piece enemy friendly =
-        moveSquaresForPiece board fromSquare piece 1
-        |> Seq.filter (fun toSquare ->
-            let movedBoard = boardAfterMove board fromSquare toSquare piece
-            match kingSquare movedBoard enemy with
-            | None -> true
-            | Some king ->
-                not (Set.contains king (attackedSquaresByColorWithDir movedBoard friendly -1)))
-        |> Seq.filter (fun toSquare ->
-            let movedBoard = boardAfterMove board fromSquare toSquare piece
-            piecesAttackingSquare movedBoard friendly -1 toSquare
-            |> Seq.exists (fun (attackerSquare, attacker) ->
-                let boardAfterCapture =
-                    movedBoard |> Map.remove attackerSquare |> Map.add toSquare attacker
-                let enemyDefends = defendedAgainstAttackers movedBoard enemy 1 friendly -1 toSquare
-                (match kingSquare boardAfterCapture friendly with
-                 | None -> true
-                 | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture enemy 1)))
-                && (not enemyDefends || pieceValue piece > pieceValue attacker))
-            |> not)
-        |> Seq.choose (fun toSquare ->
-            let forked =
-                forkedVulnerableTargetsAfterMove board fromSquare toSquare piece friendly -1 1
-            if Set.count forked >= 2 then
-                Some(fromSquare, toSquare)
-            else
-                None)
-
     let enemyForkMoveArrows (board: BoardState) : (Square * Square) list =
-        withEnemyColor board (fun enemy ->
-            let friendly = oppositeColor enemy
-            piecesOfColor board enemy
-            |> Seq.collect (fun (fromSquare, piece) -> enemyForkMoveArrowsForPiece board fromSquare piece enemy friendly)
-            |> Seq.distinct
-            |> Seq.toList)
+        forkMoveArrowsCore board (fun e _ -> e)
