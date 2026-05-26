@@ -465,3 +465,29 @@ module AttackCalculatorTests =
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
         Assert.DoesNotContain(({ File = 3; Rank = 3 }, { File = 2; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``enemyForkMoveArrows returns empty for an empty board`` () =
+        let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForkMoveArrows board)
+
+    [<Fact>]
+    let ``enemyForkMoveArrows reports an enemy move that forks two friendly pieces`` () =
+        // The top (enemy) white knight on d8 (file=3,rank=0) can move to e6
+        // (file=4,rank=2), where it attacks the undefended black pawns on d5
+        // (file=3,rank=4) and f5 (file=5,rank=4).
+        let board = parse "3N4/8/8/8/3p1p2/8/8/8 w - - 0 1"
+        let arrows = AttackCalculator.enemyForkMoveArrows board
+
+        Assert.Contains(({ File = 3; Rank = 0 }, { File = 4; Rank = 2 }), arrows)
+
+    [<Fact>]
+    let ``enemyForkMoveArrows does not report fork when enemy piece is undefended and capturable`` () =
+        // The enemy knight can reach a forking square but a friendly rook on the
+        // same file can immediately capture it, so the fork attempt is unsound.
+        // Enemy (white) knight on d8 (file=3,rank=0) moves to e6 (file=4,rank=2)
+        // but a black rook on e5 (file=4,rank=3) can recapture it immediately.
+        let board = parse "3N4/8/8/8/3p1p2/4r3/8/8 w - - 0 1"
+        let arrows = AttackCalculator.enemyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 3; Rank = 0 }, { File = 4; Rank = 2 }), arrows)

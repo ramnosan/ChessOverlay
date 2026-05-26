@@ -88,35 +88,30 @@ module ChromeBoardDetector =
                 return None
         }
 
-    let private evaluate (wsUrl: string) (expression: string) =
-        async {
-            use ws = new ClientWebSocket()
-            use cts = new CancellationTokenSource(TimeSpan.FromSeconds 5.0)
+    let private readFullResponse (ws: ClientWebSocket) (cts: CancellationTokenSource) = async {
+        let buf = Array.zeroCreate<byte> 65536
+        let sb = StringBuilder()
+        let mutable isDone = false
+        while not isDone do
+            let! res = ws.ReceiveAsync(ArraySegment buf, cts.Token) |> Async.AwaitTask
+            sb.Append(Encoding.UTF8.GetString(buf, 0, res.Count)) |> ignore
+            isDone <- res.EndOfMessage
+        return sb.ToString()
+    }
 
-            try
-                do! ws.ConnectAsync(Uri wsUrl, cts.Token) |> Async.AwaitTask
-
-                let msg =
-                    sprintf
-                        """{"id":1,"method":"Runtime.evaluate","params":{"expression":%s,"returnByValue":true}}"""
-                        (JsonSerializer.Serialize expression)
-
-                let bytes = Encoding.UTF8.GetBytes msg
-                do! ws.SendAsync(ArraySegment bytes, WebSocketMessageType.Text, true, cts.Token) |> Async.AwaitTask
-
-                let buf = Array.zeroCreate<byte> 65536
-                let sb = StringBuilder()
-                let mutable isDone = false
-
-                while not isDone do
-                    let! res = ws.ReceiveAsync(ArraySegment buf, cts.Token) |> Async.AwaitTask
-                    sb.Append(Encoding.UTF8.GetString(buf, 0, res.Count)) |> ignore
-                    isDone <- res.EndOfMessage
-
-                return Some(sb.ToString())
-            with _ ->
-                return None
-        }
+    let private sendEvaluate (wsUrl: string) (expression: string) = async {
+        use ws = new ClientWebSocket()
+        use cts = new CancellationTokenSource(TimeSpan.FromSeconds 5.0)
+        do! ws.ConnectAsync(Uri wsUrl, cts.Token) |> Async.AwaitTask
+        let msg =
+            sprintf
+                """{"id":1,"method":"Runtime.evaluate","params":{"expression":%s,"returnByValue":true}}"""
+                (JsonSerializer.Serialize expression)
+        let bytes = Encoding.UTF8.GetBytes msg
+        do! ws.SendAsync(ArraySegment bytes, WebSocketMessageType.Text, true, cts.Token) |> Async.AwaitTask
+        let! result = readFullResponse ws cts
+        return result
+    }
 
     // BoardGeometry coordinates must be relative to the VirtualScreen bitmap origin,
     // matching what BoardSelectionWindow produces via form-client mouse coordinates.
@@ -146,7 +141,7 @@ module ChromeBoardDetector =
             else None)
 
     // try/with is unavoidable for the HTTP call; all other branches are inline.
-    let private parseGeometry (response: string) =
+    let internal parseGeometry (response: string) =
         try
             use doc = JsonDocument.Parse response
             tryGet doc.RootElement "result" |> Option.bind (fun r1 ->
@@ -156,8 +151,11 @@ module ChromeBoardDetector =
 
     let tryDetectBoardInTab (tab: ChromeTab) =
         async {
-            let! response = evaluate tab.WebSocketUrl detectionScript
-            return response |> Option.bind parseGeometry
+            try
+                let! response = sendEvaluate tab.WebSocketUrl detectionScript
+                return parseGeometry response
+            with _ ->
+                return None
         }
 
     let private detectBoardInTab (tab: ChromeTab) =

@@ -100,6 +100,7 @@ type OverlayController(
                 | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
                     let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
                     let friendlyForkMoveArrows = AttackCalculator.friendlyForkMoveArrows boardReading.Board
+                    let enemyForkMoveArrows = AttackCalculator.enemyForkMoveArrows boardReading.Board
                     let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
                     let enemyHangingSquares = AttackCalculator.enemyHangingSquares boardReading.Board
 
@@ -118,6 +119,7 @@ type OverlayController(
                                             Geometry = screenGeometry
                                             AttackArrows = attackArrows
                                             FriendlyForkMoveArrows = friendlyForkMoveArrows
+                                            EnemyForkMoveArrows = enemyForkMoveArrows
                                             HangingSquares = hangingSquares
                                             EnemyHangingSquares = enemyHangingSquares
                                             ForkSquares = forkSquares

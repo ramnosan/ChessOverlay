@@ -231,6 +231,18 @@ module Program =
             overlay.ShowStatus(statusMsg)
             controller.Start())
 
+        let mutable paused = false
+
+        overlay.ToggleOverlayRequested.Add(fun () ->
+            if paused then
+                paused <- false
+                controller.Start()
+            else
+                paused <- true
+                controller.Stop()
+                overlay.ClearFrame()
+                overlay.ShowStatus("Overlay paused - Ctrl+Shift+O to resume"))
+
         overlay.SelectBoardRequested.Add(fun () ->
             let applyGeometry geometry =
                 BoardGeometryStorage.save geometry

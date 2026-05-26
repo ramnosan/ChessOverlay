@@ -378,3 +378,39 @@ module AttackCalculator =
         enemyColor board
         |> Option.map (enemyForksForColor board)
         |> Option.defaultValue []
+
+    let private enemyForkMoveArrowsForPiece board fromSquare piece enemy friendly =
+        moveSquaresForPiece board fromSquare piece 1
+        |> Seq.filter (fun toSquare ->
+            let movedBoard = boardAfterMove board fromSquare toSquare piece
+            match kingSquare movedBoard enemy with
+            | None -> true
+            | Some king ->
+                not (Set.contains king (attackedSquaresByColorWithDir movedBoard friendly -1)))
+        |> Seq.filter (fun toSquare ->
+            let movedBoard = boardAfterMove board fromSquare toSquare piece
+            piecesAttackingSquare movedBoard friendly -1 toSquare
+            |> Seq.exists (fun (attackerSquare, attacker) ->
+                let boardAfterCapture =
+                    movedBoard |> Map.remove attackerSquare |> Map.add toSquare attacker
+                let enemyDefends = defendedAgainstAttackers movedBoard enemy 1 friendly -1 toSquare
+                (match kingSquare boardAfterCapture friendly with
+                 | None -> true
+                 | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture enemy 1)))
+                && (not enemyDefends || pieceValue piece > pieceValue attacker))
+            |> not)
+        |> Seq.choose (fun toSquare ->
+            let forked =
+                forkedVulnerableTargetsAfterMove board fromSquare toSquare piece friendly -1 1
+            if Set.count forked >= 2 then
+                Some(fromSquare, toSquare)
+            else
+                None)
+
+    let enemyForkMoveArrows (board: BoardState) : (Square * Square) list =
+        withEnemyColor board (fun enemy ->
+            let friendly = oppositeColor enemy
+            piecesOfColor board enemy
+            |> Seq.collect (fun (fromSquare, piece) -> enemyForkMoveArrowsForPiece board fromSquare piece enemy friendly)
+            |> Seq.distinct
+            |> Seq.toList)

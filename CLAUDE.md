@@ -198,6 +198,7 @@ AttackCalculator.enemyColor uses mean rank: whichever color's pieces sit at lowe
 ## Keyboard Shortcuts
 
 - **Ctrl+Shift+B**: Open board selection dialog (hotkey registered with OS)
+- **Ctrl+Shift+O**: Toggle overlay on/off (pauses/resumes scanning and clears the frame)
 
 ## Testing Strategy
 

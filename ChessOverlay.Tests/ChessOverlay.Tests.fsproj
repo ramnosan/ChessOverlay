@@ -19,6 +19,7 @@
     <Compile Include="QualityTools\ArchitectureViewTests.fs" />
     <Compile Include="ProgramTests.fs" />
     <Compile Include="BoardSelectionWindowTests.fs" />
+    <Compile Include="ChromeBoardDetectorTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

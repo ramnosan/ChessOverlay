@@ -76,3 +76,30 @@ module CrapMetricTests =
             }
 
         Assert.Equal(Some 0.5, CrapMetric.coverageForSpan coverage span)
+
+    [<Fact>]
+    let ``Pipe operators at line start are not counted as match arms`` () =
+        let root = tempRoot ()
+        let app = Path.Combine(root, "ChessOverlay")
+        Directory.CreateDirectory(app) |> ignore
+        let file = Path.Combine(app, "Sample.fs")
+
+        let source =
+            String.Join(
+                Environment.NewLine,
+                [
+                    "namespace Sample"
+                    ""
+                    "module Demo ="
+                    "    let pipeline xs ="
+                    "        xs"
+                    "        |> List.map id"
+                    "        |> List.filter (fun _ -> true)"
+                ])
+
+        File.WriteAllText(file, source)
+
+        let spans = CrapMetric.findFunctionSpans root file
+        let pipeline = spans |> List.find (fun span -> span.Name = "pipeline")
+
+        Assert.Equal(1, pipeline.CyclomaticComplexity)

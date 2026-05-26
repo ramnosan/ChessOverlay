@@ -129,7 +129,7 @@ module CrapMetric =
             + countRegex @"\bwith\b" code
             + countRegex @"\|\|" code
             + countRegex @"&&" code
-            + if Regex.IsMatch(code, @"^\s*\|") then 1 else 0)
+            + if Regex.IsMatch(code, @"^\s*\|(?![>|])") then 1 else 0)
 
     let private displayName (name: string) =
         let quoted = quotedNamePattern.Match(name)

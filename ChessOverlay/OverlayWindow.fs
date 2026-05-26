@@ -22,7 +22,9 @@ type OverlayWindow() as this =
     let mutable statusText = "Press Ctrl+Shift+B to select the board area"
     let virtualBounds = SystemInformation.VirtualScreen
     let hotkeyId = 1
+    let toggleHotkeyId = 2
     let selectBoardRequested = Event<unit>()
+    let toggleOverlayRequested = Event<unit>()
 
     do
         this.FormBorderStyle <- FormBorderStyle.None
@@ -49,13 +51,22 @@ type OverlayWindow() as this =
 
         NativeMethods.tryExcludeFromCapture this.Handle
         NativeMethods.registerHotKey this.Handle hotkeyId 0x0006u 0x42u |> ignore
-        this.FormClosed.Add(fun _ -> NativeMethods.unregisterHotKey this.Handle hotkeyId |> ignore)
+        NativeMethods.registerHotKey this.Handle toggleHotkeyId 0x0006u 0x4Fu |> ignore
+
+        this.FormClosed.Add(fun _ ->
+            NativeMethods.unregisterHotKey this.Handle hotkeyId |> ignore
+            NativeMethods.unregisterHotKey this.Handle toggleHotkeyId |> ignore)
 
     member _.SelectBoardRequested = selectBoardRequested.Publish
+    member _.ToggleOverlayRequested = toggleOverlayRequested.Publish
 
     override _.WndProc(m: byref<Message>) =
-        if m.Msg = 0x0312 && m.WParam.ToInt32() = hotkeyId then
-            selectBoardRequested.Trigger()
+        if m.Msg = 0x0312 then
+            if m.WParam.ToInt32() = hotkeyId then
+                selectBoardRequested.Trigger()
+            elif m.WParam.ToInt32() = toggleHotkeyId then
+                toggleOverlayRequested.Trigger()
+
         base.WndProc(&m)
 
     member _.ShowFrame(nextFrame: OverlayFrame) =
@@ -75,6 +86,10 @@ type OverlayWindow() as this =
         statusText <- message
         this.Invalidate()
 
+    member _.ClearFrame() =
+        frame <- None
+        this.Invalidate()
+
     member _.ShowUncertainBoard(geometry: BoardGeometry, ?message: string) =
         frame <-
             Some
@@ -82,6 +97,7 @@ type OverlayWindow() as this =
                     Geometry = geometry
                     AttackArrows = []
                     FriendlyForkMoveArrows = []
+                    EnemyForkMoveArrows = []
                     HangingSquares = Set.empty
                     EnemyHangingSquares = Set.empty
                     ForkSquares = Set.empty
@@ -129,6 +145,19 @@ type OverlayWindow() as this =
                 let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
                 let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
                 args.Graphics.DrawLine(friendlyForkMovePen, fromCenter, toCenter)
+
+            use enemyForkMovePen = new Pen(forkColor, penWidth * 1.4f)
+            use enemyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
+            enemyForkMovePen.StartCap <- Drawing2D.LineCap.Round
+            enemyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
+            enemyForkMovePen.CustomEndCap <- enemyForkMoveCap
+
+            for (fromSq, toSq) in current.EnemyForkMoveArrows do
+                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                args.Graphics.DrawLine(enemyForkMovePen, fromCenter, toCenter)
 
             use hangingPen = new Pen(hangingColor, penWidth * 1.8f)
 
