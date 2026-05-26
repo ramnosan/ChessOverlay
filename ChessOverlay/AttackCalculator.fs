@@ -37,6 +37,11 @@ module AttackCalculator =
     let private oppositeColor color =
         if color = White then Black else White
 
+    let private piecesOfColor board color =
+        board
+        |> Map.toSeq
+        |> Seq.filter (fun (_, piece) -> piece.Color = color)
+
     let private knightRays square =
         steps [ -2, -1; -2, 1; -1, -2; -1, 2; 1, -2; 1, 2; 2, -1; 2, 1 ] square
 
@@ -81,13 +86,8 @@ module AttackCalculator =
         attacksForPieceWithDir board square piece 1
 
     let attackedSquaresByColorWithDir (board: BoardState) color pawnRankDelta =
-        board
-        |> Map.toSeq
-        |> Seq.choose (fun (square, piece) ->
-            if piece.Color = color then
-                Some(attacksForPieceWithDir board square piece pawnRankDelta)
-            else
-                None)
+        piecesOfColor board color
+        |> Seq.map (fun (square, piece) -> attacksForPieceWithDir board square piece pawnRankDelta)
         |> fun attacks ->
             if Seq.isEmpty attacks then
                 Set.empty
@@ -99,9 +99,8 @@ module AttackCalculator =
 
     let private meanRank color (board: BoardState) =
         let ranks =
-            board
-            |> Map.toSeq
-            |> Seq.choose (fun (square, piece) -> if piece.Color = color then Some(float square.Rank) else None)
+            piecesOfColor board color
+            |> Seq.map (fun (square, _) -> float square.Rank)
             |> Seq.toList
 
         match ranks with
@@ -127,17 +126,18 @@ module AttackCalculator =
         attackRaysForPiece board square piece
         |> List.choose (fun ray -> List.tryLast ray |> Option.map (fun far -> square, far))
 
+    let private withEnemyColor board (f: PieceColor -> (Square * Square) list) =
+        match enemyColor board with
+        | None -> []
+        | Some color -> f color
+
     // One arrow per direction a piece can move, ending at the farthest square
     // it can see/attack along that ray.
     let enemyAttackArrows (board: BoardState) : (Square * Square) list =
-        match enemyColor board with
-        | None -> []
-        | Some color ->
-            board
-            |> Map.toSeq
-            |> Seq.filter (fun (_, piece) -> piece.Color = color)
+        withEnemyColor board (fun color ->
+            piecesOfColor board color
             |> Seq.collect (fun (square, piece) -> pieceArrows board square piece)
-            |> Seq.toList
+            |> Seq.toList)
 
     let private pieceValue piece =
         match piece.Kind with
@@ -219,9 +219,7 @@ module AttackCalculator =
         | None -> false
 
     let private isOpponentPiece board color square =
-        match BoardState.tryPieceAt square board with
-        | Some piece -> piece.Color = oppositeColor color
-        | None -> false
+        isOwnPiece board (oppositeColor color) square
 
     let private pawnMoveSquares board square color pawnRankDelta =
         let oneStep =
@@ -275,30 +273,19 @@ module AttackCalculator =
         | Some king ->
             not (Set.contains king (attackedSquaresByColorWithDir movedBoard enemy 1))
 
-    let private givesCheckAfterMove movedBoard toSquare piece enemy =
-        match kingSquare movedBoard enemy with
-        | None -> false
-        | Some enemyKing -> Set.contains enemyKing (attacksForPieceWithDir movedBoard toSquare piece -1)
-
     let private enemyKingSafeAfterCapture boardAfterCapture enemy friendly =
         match kingSquare boardAfterCapture enemy with
         | None -> true
         | Some king -> not (Set.contains king (attackedSquaresByColorWithDir boardAfterCapture friendly -1))
 
-    let private forcingCheckPreventsCapture givesCheck attacker piece =
-        givesCheck && attacker.Kind <> King && piece.Kind <> Queen
+    let private legalCaptureWinsForkingPiece movedBoard toSquare piece friendly enemy friendlyDefendsForkingPiece (attackerSquare, attacker) =
+        let boardAfterCapture =
+            movedBoard
+            |> Map.remove attackerSquare
+            |> Map.add toSquare attacker
 
-    let private legalCaptureWinsForkingPiece movedBoard toSquare piece friendly enemy givesCheck friendlyDefendsForkingPiece (attackerSquare, attacker) =
-        if forcingCheckPreventsCapture givesCheck attacker piece then
-            false
-        else
-            let boardAfterCapture =
-                movedBoard
-                |> Map.remove attackerSquare
-                |> Map.add toSquare attacker
-
-            enemyKingSafeAfterCapture boardAfterCapture enemy friendly
-            && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
+        enemyKingSafeAfterCapture boardAfterCapture enemy friendly
+        && (not friendlyDefendsForkingPiece || pieceValue piece > pieceValue attacker)
 
     let private forkingPieceIsSafeAfterMove board fromSquare toSquare piece friendly enemy =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
@@ -311,7 +298,6 @@ module AttackCalculator =
                 piece
                 friendly
                 enemy
-                (givesCheckAfterMove movedBoard toSquare piece enemy)
                 (defendedAgainstAttackers movedBoard friendly -1 enemy 1 toSquare)
         )
         |> not
@@ -349,17 +335,12 @@ module AttackCalculator =
                 None)
 
     let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
-        match enemyColor board with
-        | None -> []
-        | Some enemy ->
+        withEnemyColor board (fun enemy ->
             let friendly = oppositeColor enemy
-
-            board
-            |> Map.toSeq
-            |> Seq.filter (fun (_, piece) -> piece.Color = friendly)
+            piecesOfColor board friendly
             |> Seq.collect (fun (fromSquare, piece) -> forkMoveArrowsForPiece board fromSquare piece friendly enemy)
             |> Seq.distinct
-            |> Seq.toList
+            |> Seq.toList)
 
     // A fork is a single enemy (top) piece that attacks two or more *undefended*
     // friendly pieces at once. Defended pieces are excluded: if their defender
@@ -370,10 +351,9 @@ module AttackCalculator =
     let private undefendedSquaresFor board targetColor defenderPawnRankDelta =
         let defended = attackedSquaresByColorWithDir board targetColor defenderPawnRankDelta
 
-        board
-        |> Map.toSeq
-        |> Seq.choose (fun (square, piece) ->
-            if piece.Color = targetColor && not (Set.contains square defended) then
+        piecesOfColor board targetColor
+        |> Seq.choose (fun (square, _) ->
+            if not (Set.contains square defended) then
                 Some square
             else
                 None)
@@ -390,9 +370,7 @@ module AttackCalculator =
         let friendly = oppositeColor enemy
         let undefendedFriendly = undefendedSquaresFor board friendly -1
 
-        board
-        |> Map.toSeq
-        |> Seq.filter (fun (_, piece) -> piece.Color = enemy)
+        piecesOfColor board enemy
         |> Seq.choose (fun (square, piece) -> forkForPiece board undefendedFriendly square piece)
         |> Seq.toList
 

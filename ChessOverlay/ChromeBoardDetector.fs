@@ -56,19 +56,15 @@ module ChromeBoardDetector =
 
     // Explicit string overload annotation avoids F# ambiguity with ReadOnlySpan overloads.
     let private tryGet (el: JsonElement) (name: string) =
-        match el.TryGetProperty name with
-        | true, v -> Some v
-        | _ -> None
+        let ok, v = el.TryGetProperty name
+        if ok then Some v else None
 
     let private tryGetString (el: JsonElement) (name: string) =
-        match tryGet el name with
-        | Some v when v.ValueKind = JsonValueKind.String -> Some(v.GetString())
-        | _ -> None
+        tryGet el name |> Option.bind (fun v ->
+            if v.ValueKind = JsonValueKind.String then Some(v.GetString()) else None)
 
     let private tryGetInt (el: JsonElement) (name: string) =
-        match tryGet el name with
-        | Some v -> ValueSome(v.GetInt32())
-        | _ -> ValueNone
+        tryGet el name |> Option.map (fun v -> v.GetInt32()) |> Option.toValueOption
 
     // Option.bind chain — avoids match/with keywords so CC stays at 1.
     let private tryBuildTab (tab: JsonElement) =
@@ -160,9 +156,8 @@ module ChromeBoardDetector =
 
     let tryDetectBoardInTab (tab: ChromeTab) =
         async {
-            match! evaluate tab.WebSocketUrl detectionScript with
-            | Some response -> return parseGeometry response
-            | None -> return None
+            let! response = evaluate tab.WebSocketUrl detectionScript
+            return response |> Option.bind parseGeometry
         }
 
     let private detectBoardInTab (tab: ChromeTab) =

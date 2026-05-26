@@ -324,28 +324,34 @@ module AttackCalculatorTests =
     let ``friendlyForkMoveArrows reports a real game royal fork with defended targets`` () =
         // ChessWorld, Papas vs Oreopoulos, Puzzle ID 160: 1.Nxd6+ forks the
         // black king on f7 and queen on c4 from the published FEN.
+        // However the black knight on f5 can capture the white knight on d6;
+        // this is a multi-move tactic, not a one-move fork.
         let board = parse "2r2r2/1n3kb1/p2p2p1/1p1p1nBp/1PqPN2P/2P3P1/Q4PB1/R1R3K1 w - - 0 1"
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
-        Assert.Contains(({ File = 4; Rank = 4 }, { File = 3; Rank = 2 }), arrows)
+        Assert.DoesNotContain(({ File = 4; Rank = 4 }, { File = 3; Rank = 2 }), arrows)
 
     [<Fact>]
     let ``friendlyForkMoveArrows reports Bonin Alburt royal fork from published puzzle FEN`` () =
         // W.T. Harvey's Bonin vs Alburt puzzle gives this FEN with solution
         // Nf5+, a fork of the defended black king on g7 and queen on e7.
+        // However the black pawn on g6 can capture the knight on f5;
+        // this is a multi-move tactic, not a one-move fork.
         let board = parse "5b2/2r1q1k1/p2pQ1p1/P1pPp2p/4P3/2P1NR1P/6PK/8 w - - 1 0"
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
-        Assert.Contains(({ File = 4; Rank = 5 }, { File = 5; Rank = 3 }), arrows)
+        Assert.DoesNotContain(({ File = 4; Rank = 5 }, { File = 5; Rank = 3 }), arrows)
 
     [<Fact>]
     let ``friendlyForkMoveArrows reports Capablanca Graham rook fork from published puzzle FEN`` () =
         // ChessWorld, Capablanca vs Graham, Puzzle ID 714: 1.Rxc6+ forks the
         // black king on c8 and queen on d6 from the published FEN.
+        // However the black queen on d6 can capture the rook on c6;
+        // the rook captured a knight on c6 but loses the exchange.
         let board = parse "r1k5/p6p/2nqrp2/p2N4/3p4/5QP1/1P3P1P/R1R3K1 w - - 0 1"
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
-        Assert.Contains(({ File = 2; Rank = 7 }, { File = 2; Rank = 2 }), arrows)
+        Assert.DoesNotContain(({ File = 2; Rank = 7 }, { File = 2; Rank = 2 }), arrows)
 
     [<Fact>]
     let ``friendlyForkMoveArrows does not report Korchnoi Smirin setup retreat as an immediate fork`` () =
@@ -450,3 +456,12 @@ module AttackCalculatorTests =
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
         Assert.Contains(({ File = 4; Rank = 7 }, { File = 4; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects false fork when queen captures the forking knight on an undefended square`` () =
+        // Caro-Kann after 7.Nxd5: Nc7+ attacks king and rook, but the black
+        // queen on d8 can simply capture the undefended knight on c7.
+        let board = parse "r1bqkbnr/pp3ppp/8/3Nn3/8/4B3/PPP2PPP/RN1QKBNR b - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 3; Rank = 3 }, { File = 2; Rank = 1 }), arrows)
