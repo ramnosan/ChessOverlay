@@ -20,6 +20,7 @@ type OverlayWindow() as this =
     let statusTextColor = Color.White
     let mutable frame: OverlayFrame option = None
     let mutable statusText = "Press Ctrl+Shift+B to select the board area"
+    let mutable overlayUiVisible = true
     let virtualBounds = SystemInformation.VirtualScreen
     let hotkeyId = 1
     let toggleHotkeyId = 2
@@ -75,11 +76,17 @@ type OverlayWindow() as this =
             match nextFrame.DetectedPieces with
             | Some board -> (AttackCalculator.enemyAttackedSquares board).Count
             | None -> 0
+
+        let strategy =
+            nextFrame.Strategy
+            |> Option.map (sprintf "Reader: %s - ")
+            |> Option.defaultValue ""
+
         statusText <-
             if nextFrame.ForkSquares.IsEmpty then
-                sprintf "Board selected - %i attacked squares" attackedCount
+                sprintf "%s%i attacked squares" strategy attackedCount
             else
-                sprintf "Board selected - %i attacked squares, %i fork(s)" attackedCount nextFrame.ForkSquares.Count
+                sprintf "%s%i attacked squares, %i fork(s)" strategy attackedCount nextFrame.ForkSquares.Count
         this.Invalidate()
 
     member _.ShowStatus(message: string) =
@@ -88,6 +95,15 @@ type OverlayWindow() as this =
 
     member _.ClearFrame() =
         frame <- None
+        this.Invalidate()
+
+    member _.HideOverlayUi() =
+        overlayUiVisible <- false
+        frame <- None
+        this.Invalidate()
+
+    member _.ShowOverlayUi() =
+        overlayUiVisible <- true
         this.Invalidate()
 
     member _.ShowUncertainBoard(geometry: BoardGeometry, ?message: string) =
@@ -102,6 +118,7 @@ type OverlayWindow() as this =
                     EnemyHangingSquares = Set.empty
                     ForkSquares = Set.empty
                     DetectedPieces = None
+                    Strategy = None
                 }
 
         statusText <- defaultArg message "Board selected - reading pieces..."
@@ -109,114 +126,115 @@ type OverlayWindow() as this =
 
     override _.OnPaint(args) =
         base.OnPaint args
-        args.Graphics.CompositingQuality <- Drawing2D.CompositingQuality.HighQuality
-        args.Graphics.InterpolationMode <- Drawing2D.InterpolationMode.HighQualityBicubic
-        args.Graphics.PixelOffsetMode <- Drawing2D.PixelOffsetMode.HighQuality
-        args.Graphics.SmoothingMode <- Drawing2D.SmoothingMode.AntiAlias
-        args.Graphics.TextRenderingHint <- Text.TextRenderingHint.ClearTypeGridFit
+        if overlayUiVisible then
+            args.Graphics.CompositingQuality <- Drawing2D.CompositingQuality.HighQuality
+            args.Graphics.InterpolationMode <- Drawing2D.InterpolationMode.HighQualityBicubic
+            args.Graphics.PixelOffsetMode <- Drawing2D.PixelOffsetMode.HighQuality
+            args.Graphics.SmoothingMode <- Drawing2D.SmoothingMode.AntiAlias
+            args.Graphics.TextRenderingHint <- Text.TextRenderingHint.ClearTypeGridFit
 
-        match frame with
-        | None -> this.PaintStatus args.Graphics
-        | Some current ->
-            let penWidth = single current.Geometry.SquareSize * 0.035f
-            use arrowPen = new Pen(arrowColor, penWidth)
-            use arrowCap = new Drawing2D.AdjustableArrowCap(3.5f, 3.5f, true)
-            arrowPen.StartCap <- Drawing2D.LineCap.Round
-            arrowPen.LineJoin <- Drawing2D.LineJoin.Round
-            arrowPen.CustomEndCap <- arrowCap
-            use outlinePen = new Pen(outlineColor, 3.0f)
+            match frame with
+            | None -> this.PaintStatus args.Graphics
+            | Some current ->
+                let penWidth = single current.Geometry.SquareSize * 0.035f
+                use arrowPen = new Pen(arrowColor, penWidth)
+                use arrowCap = new Drawing2D.AdjustableArrowCap(3.5f, 3.5f, true)
+                arrowPen.StartCap <- Drawing2D.LineCap.Round
+                arrowPen.LineJoin <- Drawing2D.LineJoin.Round
+                arrowPen.CustomEndCap <- arrowCap
+                use outlinePen = new Pen(outlineColor, 3.0f)
 
-            for (fromSq, toSq) in current.AttackArrows do
-                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
-                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
-                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
-                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
-                args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
+                for (fromSq, toSq) in current.AttackArrows do
+                    let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                    let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                    let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                    let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                    args.Graphics.DrawLine(arrowPen, fromCenter, toCenter)
 
-            use friendlyForkMovePen = new Pen(friendlyForkMoveColor, penWidth * 1.4f)
-            use friendlyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
-            friendlyForkMovePen.StartCap <- Drawing2D.LineCap.Round
-            friendlyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
-            friendlyForkMovePen.CustomEndCap <- friendlyForkMoveCap
+                use friendlyForkMovePen = new Pen(friendlyForkMoveColor, penWidth * 1.4f)
+                use friendlyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
+                friendlyForkMovePen.StartCap <- Drawing2D.LineCap.Round
+                friendlyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
+                friendlyForkMovePen.CustomEndCap <- friendlyForkMoveCap
 
-            for (fromSq, toSq) in current.FriendlyForkMoveArrows do
-                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
-                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
-                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
-                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
-                args.Graphics.DrawLine(friendlyForkMovePen, fromCenter, toCenter)
+                for (fromSq, toSq) in current.FriendlyForkMoveArrows do
+                    let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                    let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                    let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                    let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                    args.Graphics.DrawLine(friendlyForkMovePen, fromCenter, toCenter)
 
-            use enemyForkMovePen = new Pen(forkColor, penWidth * 1.4f)
-            use enemyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
-            enemyForkMovePen.StartCap <- Drawing2D.LineCap.Round
-            enemyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
-            enemyForkMovePen.CustomEndCap <- enemyForkMoveCap
+                use enemyForkMovePen = new Pen(forkColor, penWidth * 1.4f)
+                use enemyForkMoveCap = new Drawing2D.AdjustableArrowCap(3.8f, 3.8f, true)
+                enemyForkMovePen.StartCap <- Drawing2D.LineCap.Round
+                enemyForkMovePen.LineJoin <- Drawing2D.LineJoin.Round
+                enemyForkMovePen.CustomEndCap <- enemyForkMoveCap
 
-            for (fromSq, toSq) in current.EnemyForkMoveArrows do
-                let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
-                let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
-                let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
-                let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
-                args.Graphics.DrawLine(enemyForkMovePen, fromCenter, toCenter)
+                for (fromSq, toSq) in current.EnemyForkMoveArrows do
+                    let fromRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle fromSq)
+                    let toRect = this.ToClientRectangle(current.Geometry.GetSquareRectangle toSq)
+                    let fromCenter = PointF(fromRect.X + fromRect.Width / 2.0f, fromRect.Y + fromRect.Height / 2.0f)
+                    let toCenter = PointF(toRect.X + toRect.Width / 2.0f, toRect.Y + toRect.Height / 2.0f)
+                    args.Graphics.DrawLine(enemyForkMovePen, fromCenter, toCenter)
 
-            use hangingPen = new Pen(hangingColor, penWidth * 1.8f)
+                use hangingPen = new Pen(hangingColor, penWidth * 1.8f)
 
-            for sq in current.HangingSquares do
-                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
-                let inset = rect.Width * 0.1f
-                args.Graphics.DrawEllipse(
-                    hangingPen,
-                    rect.X + inset,
-                    rect.Y + inset,
-                    rect.Width - 2.0f * inset,
-                    rect.Height - 2.0f * inset)
+                for sq in current.HangingSquares do
+                    let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                    let inset = rect.Width * 0.1f
+                    args.Graphics.DrawEllipse(
+                        hangingPen,
+                        rect.X + inset,
+                        rect.Y + inset,
+                        rect.Width - 2.0f * inset,
+                        rect.Height - 2.0f * inset)
 
-            use enemyHangingPen = new Pen(enemyHangingColor, penWidth * 1.8f)
-            enemyHangingPen.DashStyle <- Drawing2D.DashStyle.Dash
+                use enemyHangingPen = new Pen(enemyHangingColor, penWidth * 1.8f)
+                enemyHangingPen.DashStyle <- Drawing2D.DashStyle.Dash
 
-            for sq in current.EnemyHangingSquares do
-                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
-                let inset = rect.Width * 0.18f
-                args.Graphics.DrawEllipse(
-                    enemyHangingPen,
-                    rect.X + inset,
-                    rect.Y + inset,
-                    rect.Width - 2.0f * inset,
-                    rect.Height - 2.0f * inset)
+                for sq in current.EnemyHangingSquares do
+                    let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                    let inset = rect.Width * 0.18f
+                    args.Graphics.DrawEllipse(
+                        enemyHangingPen,
+                        rect.X + inset,
+                        rect.Y + inset,
+                        rect.Width - 2.0f * inset,
+                        rect.Height - 2.0f * inset)
 
-            // A fork is an enemy piece hitting two or more friendly pieces; mark
-            // its square so the more dangerous threat stands out from plain attacks.
-            use forkPen = new Pen(forkColor, penWidth * 1.8f)
+                // A fork is an enemy piece hitting two or more friendly pieces; mark
+                // its square so the more dangerous threat stands out from plain attacks.
+                use forkPen = new Pen(forkColor, penWidth * 1.8f)
 
-            for sq in current.ForkSquares do
-                let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
-                let inset = rect.Width * 0.1f
+                for sq in current.ForkSquares do
+                    let rect = this.ToClientRectangle(current.Geometry.GetSquareRectangle sq)
+                    let inset = rect.Width * 0.1f
+                    args.Graphics.DrawRectangle(
+                        forkPen,
+                        rect.X + inset,
+                        rect.Y + inset,
+                        rect.Width - 2.0f * inset,
+                        rect.Height - 2.0f * inset)
+
+                let boardRect =
+                    RectangleF(
+                        single (current.Geometry.Left - virtualBounds.Left),
+                        single (current.Geometry.Top - virtualBounds.Top),
+                        single current.Geometry.Size,
+                        single current.Geometry.Size)
+
                 args.Graphics.DrawRectangle(
-                    forkPen,
-                    rect.X + inset,
-                    rect.Y + inset,
-                    rect.Width - 2.0f * inset,
-                    rect.Height - 2.0f * inset)
+                    outlinePen,
+                    boardRect.X,
+                    boardRect.Y,
+                    boardRect.Width,
+                    boardRect.Height)
 
-            let boardRect =
-                RectangleF(
-                    single (current.Geometry.Left - virtualBounds.Left),
-                    single (current.Geometry.Top - virtualBounds.Top),
-                    single current.Geometry.Size,
-                    single current.Geometry.Size)
+                match current.DetectedPieces with
+                | None -> ()
+                | Some pieces -> this.PaintPieceLabels(args.Graphics, current.Geometry, pieces)
 
-            args.Graphics.DrawRectangle(
-                outlinePen,
-                boardRect.X,
-                boardRect.Y,
-                boardRect.Width,
-                boardRect.Height)
-
-            match current.DetectedPieces with
-            | None -> ()
-            | Some pieces -> this.PaintPieceLabels(args.Graphics, current.Geometry, pieces)
-
-            this.PaintStatus args.Graphics
+                this.PaintStatus args.Graphics
 
     member private _.PieceNotation(piece: Piece) =
         let letter =

@@ -13,7 +13,7 @@ module ChromeBoardDetector =
     let private cdpPort = 9222
 
     // Singleton - HttpClient is not safe to dispose per-request
-    let private http = lazy (new HttpClient(Timeout = TimeSpan.FromSeconds 3.0))
+    let private http = lazy (new HttpClient(Timeout = TimeSpan.FromMilliseconds 500.0))
 
     type ChromeTab =
         { Id: string
@@ -66,6 +66,43 @@ module ChromeBoardDetector =
                 if (typeof g.fen === 'function') return g.fen();
                 if (typeof g.fen === 'string') return g.fen;
                 return null;
+            } catch (e) { return null; }
+        })()"""
+
+    // Reads the rendered chess.com board. This avoids depending on private game
+    // object names and also preserves the current screen orientation.
+    let private boardStateScript =
+        """(() => {
+            try {
+                const board = document.querySelector('chess-board, wc-chess-board');
+                if (!board) return null;
+
+                const attrOrientation =
+                    board.getAttribute('orientation') ||
+                    board.getAttribute('data-board-orientation') ||
+                    board.getAttribute('data-orientation');
+                const gameOrientation =
+                    board.game && typeof board.game.getOrientation === 'function'
+                        ? board.game.getOrientation()
+                        : null;
+                const classOrientation =
+                    board.classList && board.classList.contains('flipped')
+                        ? 'black'
+                        : null;
+                const orientation = String(attrOrientation || gameOrientation || classOrientation || 'white').toLowerCase();
+
+                const pieces = [];
+                for (const el of board.querySelectorAll('.piece, piece')) {
+                    const classes = Array.from(el.classList || []);
+                    const piece = classes.find(c => /^[wb][pnbrqk]$/.test(c));
+                    const square = classes.find(c => /^square-[1-8][1-8]$/.test(c));
+                    if (piece && square) {
+                        pieces.push({ piece, square: square.slice('square-'.length) });
+                    }
+                }
+
+                if (!pieces.length) return null;
+                return { orientation, pieces };
             } catch (e) { return null; }
         })()"""
 
@@ -211,12 +248,78 @@ module ChromeBoardDetector =
         with _ ->
             None
 
+    let private pieceFromCode (code: string) =
+        if String.IsNullOrWhiteSpace code || code.Length <> 2 then
+            None
+        else
+            let color =
+                match code[0] with
+                | 'w' -> Some White
+                | 'b' -> Some Black
+                | _ -> None
+
+            let kind =
+                match code[1] with
+                | 'p' -> Some Pawn
+                | 'n' -> Some Knight
+                | 'b' -> Some Bishop
+                | 'r' -> Some Rook
+                | 'q' -> Some Queen
+                | 'k' -> Some King
+                | _ -> None
+
+            Option.map2 (fun c k -> { Color = c; Kind = k }) color kind
+
+    let private screenSquareFromChessSquare orientation (value: string) =
+        if String.IsNullOrWhiteSpace value || value.Length <> 2 then
+            None
+        else
+            let file = int value[0] - int '1'
+            let chessRank = int value[1] - int '1'
+
+            if file < 0 || file > 7 || chessRank < 0 || chessRank > 7 then
+                None
+            elif orientation = "black" then
+                Some { File = 7 - file; Rank = chessRank }
+            else
+                Some { File = file; Rank = 7 - chessRank }
+
+    let private parseBoardPiece orientation (value: JsonElement) =
+        tryGetString value "piece" |> Option.bind (fun pieceCode ->
+        tryGetString value "square" |> Option.bind (fun squareCode ->
+        pieceFromCode pieceCode |> Option.bind (fun piece ->
+        screenSquareFromChessSquare orientation squareCode |> Option.map (fun square ->
+            square, piece))))
+
+    let internal parseBoardReading (response: string) =
+        try
+            use doc = JsonDocument.Parse response
+            tryGet doc.RootElement "result" |> Option.bind (fun r1 ->
+                tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind (fun value ->
+                    tryGetString value "orientation" |> Option.bind (fun orientation ->
+                    tryGet value "pieces" |> Option.bind (fun pieces ->
+                        if pieces.ValueKind <> JsonValueKind.Array then
+                            None
+                        else
+                            let board =
+                                pieces.EnumerateArray()
+                                |> Seq.choose (parseBoardPiece orientation)
+                                |> Map.ofSeq
+
+                            if board.IsEmpty then
+                                None
+                            else
+                                Some { Board = board; Confidence = 1.0; Candidates = Map.empty; Strategy = "Chrome DOM" }))))
+        with _ ->
+            None
+
     let private isChessSiteTab (tab: ChromeTab) =
         tab.Url.Contains("chess.com/")
 
     let private tryReadFenFromTab (tab: ChromeTab) = evalAndParse fenScript parseFen tab
+    let private tryReadBoardFromTab (tab: ChromeTab) = evalAndParse boardStateScript parseBoardReading tab
 
-    type ChromeFenReader() =
+    type ChromeBoardReader() =
         interface IBoardReader with
             member _.Read(_, _) =
                 async {
@@ -224,10 +327,18 @@ module ChromeBoardDetector =
                     | None -> return None
                     | Some tabs ->
                         let chessTabs = tabs |> List.filter isChessSiteTab
-                        let! fens = chessTabs |> List.map tryReadFenFromTab |> Async.Parallel
-                        return
-                            fens
-                            |> Array.tryPick id
-                            |> Option.bind BoardReaderHelpers.readingFromFen
+                        let! readings = chessTabs |> List.map tryReadBoardFromTab |> Async.Parallel
+
+                        match readings |> Array.tryPick id with
+                        | Some reading -> return Some reading
+                        | None ->
+                            let! fens = chessTabs |> List.map tryReadFenFromTab |> Async.Parallel
+                            return
+                                fens
+                                |> Array.tryPick id
+                                |> Option.bind (BoardReaderHelpers.readingFromFenWithStrategy "Chrome FEN")
                 }
                 |> Async.RunSynchronously
+
+    type ChromeFenReader() =
+        inherit ChromeBoardReader()

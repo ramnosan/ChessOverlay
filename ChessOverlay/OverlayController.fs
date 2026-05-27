@@ -21,6 +21,8 @@ type OverlayController(
     let timer = new Timer(Interval = scanInterval)
     let scanGate = obj ()
     let mutable scanInProgress = false
+    let mutable isRunning = false
+    let mutable scanGeneration = 0
     let mutable boardGeometry = initialGeometry
 
     let toVirtualScreenGeometry (origin: Point) (geometry: BoardGeometry) =
@@ -40,16 +42,23 @@ type OverlayController(
 
         result
 
-    let updateOverlay action =
-        if overlay.IsHandleCreated && not overlay.IsDisposed then
-            overlay.BeginInvoke(MethodInvoker action) |> ignore
+    let isActiveGeneration generation =
+        lock scanGate (fun () -> isRunning && generation = scanGeneration)
+
+    let updateOverlay generation action =
+        if isActiveGeneration generation && overlay.IsHandleCreated && not overlay.IsDisposed then
+            overlay.BeginInvoke(
+                MethodInvoker(fun () ->
+                    if isActiveGeneration generation then
+                        action ()))
+            |> ignore
 
     let uncertainStatus reading =
         match reader, reading with
         | :? UncertainBoardReader, _ -> "Board selected - no piece templates loaded"
         | _, None -> "Board selected - piece reader unavailable"
-        | _, Some boardReading when boardReading.Board.IsEmpty -> "Board selected - 0 pieces matched"
-        | _, Some boardReading -> sprintf "Board selected - only %i pieces matched" boardReading.Board.Count
+        | _, Some boardReading when boardReading.Board.IsEmpty -> sprintf "Reader: %s - 0 pieces matched" boardReading.Strategy
+        | _, Some boardReading -> sprintf "Reader: %s - only %i pieces matched" boardReading.Strategy boardReading.Board.Count
 
     let candidateNotation piece =
         let color =
@@ -83,11 +92,11 @@ type OverlayController(
             |> String.concat "; "
             |> fun summary -> Debug.WriteLine("Piece candidates: " + summary)
 
-    let scanOnce () =
-        match boardGeometry with
-        | None -> lock scanGate (fun () -> scanInProgress <- false)
-        | Some geometry ->
-            try
+    let scanOnce generation =
+        try
+            match boardGeometry with
+            | None -> ()
+            | Some geometry ->
                 let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
                 use capture = capturedBitmap
 
@@ -113,6 +122,7 @@ type OverlayController(
                         "overlay-update"
                         (fun () ->
                             updateOverlay
+                                generation
                                 (fun () ->
                                     overlay.ShowFrame
                                         {
@@ -124,30 +134,36 @@ type OverlayController(
                                             EnemyHangingSquares = enemyHangingSquares
                                             ForkSquares = forkSquares
                                             DetectedPieces = Some boardReading.Board
+                                            Strategy = Some boardReading.Strategy
                                         }))
                 | _ ->
                     let status = uncertainStatus reading
-                    measure "overlay-update" (fun () -> updateOverlay (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
-            finally
-                lock scanGate (fun () ->
-                    scanInProgress <- false)
+                    measure
+                        "overlay-update"
+                        (fun () -> updateOverlay generation (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
+        finally
+            lock scanGate (fun () -> scanInProgress <- false)
 
     let startScan () =
-        let shouldStart =
+        let scanToStart =
             lock scanGate (fun () ->
-                if scanInProgress then
-                    false
+                if scanInProgress || not isRunning then
+                    None
                 else
                     scanInProgress <- true
-                    true)
+                    Some scanGeneration)
 
-        if shouldStart then
-            Task.Run(fun () -> scanOnce ()) |> ignore
+        scanToStart
+        |> Option.iter (fun generation -> Task.Run(fun () -> scanOnce generation) |> ignore)
 
     do
         timer.Tick.Add(fun _ -> startScan ())
 
     member _.Start() =
+        lock scanGate (fun () ->
+            isRunning <- true
+            scanGeneration <- scanGeneration + 1)
+
         if boardGeometry.IsSome then
             timer.Start()
             startScan ()
@@ -155,12 +171,18 @@ type OverlayController(
     member _.UpdateGeometry(geometry: BoardGeometry) =
         boardGeometry <- Some geometry
 
-        if not timer.Enabled then
+        if isRunning && not timer.Enabled then
             timer.Start()
 
-        startScan ()
+        if isRunning then
+            startScan ()
 
-    member _.Stop() = timer.Stop()
+    member _.Stop() =
+        timer.Stop()
+
+        lock scanGate (fun () ->
+            isRunning <- false
+            scanGeneration <- scanGeneration + 1)
 
     interface IDisposable with
         member _.Dispose() =

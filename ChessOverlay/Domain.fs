@@ -54,6 +54,7 @@ type BoardReading =
         Board: BoardState
         Confidence: float
         Candidates: Map<Square, PieceMatchCandidate list>
+        Strategy: string
     }
 
 and PieceMatchCandidate =
@@ -72,6 +73,7 @@ type OverlayFrame =
         EnemyHangingSquares: Set<Square>
         ForkSquares: Set<Square>
         DetectedPieces: BoardState option
+        Strategy: string option
     }
 
 module Squares =

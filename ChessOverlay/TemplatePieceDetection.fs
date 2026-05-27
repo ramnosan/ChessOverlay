@@ -785,4 +785,4 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, fieldTemplates: seq<Bit
                     elif matchCount >= 4 then 1.0
                     else 0.5
 
-                Some { Board = board; Confidence = confidence; Candidates = candidates }
+                Some { Board = board; Confidence = confidence; Candidates = candidates; Strategy = "Template" }

@@ -5,10 +5,13 @@ open System.Drawing
 
 module BoardReaderHelpers =
     /// Builds a fully-confident reading from a FEN string, or None when the FEN is invalid.
-    let readingFromFen (fen: string) : BoardReading option =
+    let readingFromFenWithStrategy strategy (fen: string) : BoardReading option =
         match Fen.parseBoard fen with
-        | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
+        | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty; Strategy = strategy }
         | Error _ -> None
+
+    let readingFromFen (fen: string) : BoardReading option =
+        readingFromFenWithStrategy "FEN" fen
 
 type IBoardReader =
     abstract Read: Bitmap * BoardGeometry -> BoardReading option

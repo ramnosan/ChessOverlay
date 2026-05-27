@@ -162,7 +162,7 @@ module Program =
 
     let private createChromeFallbackReader templatesPath =
         let template, warning = createTemplateReader templatesPath
-        let chrome = ChromeBoardDetector.ChromeFenReader() :> IBoardReader
+        let chrome = ChromeBoardDetector.ChromeBoardReader() :> IBoardReader
         FallbackBoardReader(chrome, template) :> IBoardReader, warning
 
     let private createReaderFromFen options environmentFen =
@@ -248,12 +248,12 @@ module Program =
         overlay.ToggleOverlayRequested.Add(fun () ->
             if paused then
                 paused <- false
+                overlay.ShowOverlayUi()
                 controller.Start()
             else
                 paused <- true
                 controller.Stop()
-                overlay.ClearFrame()
-                overlay.ShowStatus("Overlay paused - Ctrl+Shift+O to resume"))
+                overlay.HideOverlayUi())
 
         overlay.SelectBoardRequested.Add(fun () ->
             let applyGeometry geometry =

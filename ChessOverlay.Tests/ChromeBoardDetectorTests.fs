@@ -66,6 +66,35 @@ module ChromeBoardDetectorTests =
         Assert.Equal(None, ChromeBoardDetector.parseFen "")
 
     [<Fact>]
+    let ``parseBoardReading extracts chess com piece classes for white orientation`` () =
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[{"piece":"wk","square":"51"},{"piece":"bp","square":"48"}]}}}}"""
+
+        match ChromeBoardDetector.parseBoardReading json with
+        | Some reading ->
+            Assert.Equal("Chrome DOM", reading.Strategy)
+            Assert.Equal(1.0, reading.Confidence)
+            Assert.Equal(Some { Color = White; Kind = King }, BoardState.tryPieceAt { File = 4; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Pawn }, BoardState.tryPieceAt { File = 3; Rank = 0 } reading.Board)
+        | None -> failwith "Expected Chrome DOM reading."
+
+    [<Fact>]
+    let ``parseBoardReading flips chess com squares for black orientation`` () =
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"black","pieces":[{"piece":"wk","square":"51"},{"piece":"bp","square":"48"}]}}}}"""
+
+        match ChromeBoardDetector.parseBoardReading json with
+        | Some reading ->
+            Assert.Equal(Some { Color = White; Kind = King }, BoardState.tryPieceAt { File = 3; Rank = 0 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Pawn }, BoardState.tryPieceAt { File = 4; Rank = 7 } reading.Board)
+        | None -> failwith "Expected Chrome DOM reading."
+
+    [<Fact>]
+    let ``parseBoardReading returns None for null or empty results`` () =
+        Assert.Equal(None, ChromeBoardDetector.parseBoardReading """{"id":1,"result":{"result":{"type":"null"}}}""")
+        Assert.Equal(None, ChromeBoardDetector.parseBoardReading """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[]}}}}""")
+
+    [<Fact>]
     let ``parseGeometry returns None for malformed JSON`` () =
         Assert.Equal(None, ChromeBoardDetector.parseGeometry "not json")
         Assert.Equal(None, ChromeBoardDetector.parseGeometry "")
