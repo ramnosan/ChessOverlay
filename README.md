@@ -1,99 +1,137 @@
-# ChessOverlay
+<p align="center" style="color: red; font-weight: bold; font-size: 2em; font-style: italic; text-decoration: underline;">
+Do not spend any money on a bankrbot SWARM token.
+</p>
 
-A Windows desktop overlay that highlights squares attacked by your opponent in real time, directly on top of any visible chessboard on screen.
+# SwarmForge
 
-![ChessOverlay in action](overlay-screenshot.png)
+**A disciplined tmux-based agent orchestration platform that turns swarms of AI agents into reliable, professional software engineers.**
 
-## What it does
+## Intent
 
-ChessOverlay sits as a transparent window over your screen. You drag-select the area where your chessboard is displayed, and the app:
+SwarmForge is an agent coordination system that facilitates communication between agents working in different git worktrees.
 
-- Reads the current board position by matching piece images against the screen
-- Determines which side is on top (the opponent)
-- Draws colored overlays showing:
-  - **Red squares** — squares attacked by the enemy
-  - **Red-tinted squares** — your pieces that are hanging (attacked and undefended)
-  - **Yellow squares** — enemy pieces that are forking two or more of your undefended pieces
-  - **Arrows** — attack rays per piece, showing how far each piece sees
-  - **Blue arrows** — friendly moves that would create a fork
+It provides a shared structure for role-specific prompts, worktree assignment, tmux sessions, and message passing so multiple agents can collaborate on the same project without stepping on each other.
 
-The app does not interact with chess engines, suggest moves, or make decisions — it only observes and visualizes what is already on screen.
+## What SwarmForge Does
 
-## Requirements
+SwarmForge is a lightweight, tmux-based orchestration layer that:
 
-- Windows 10 or 11
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- A chessboard visible somewhere on screen (browser, desktop client, etc.)
+- Launches a **config-driven swarm** from a project-local `swarmforge/swarmforge.conf`
+- Creates one tmux session and one Terminal window per configured role
+- Reads behavior from project-local `swarmforge/<role>.prompt` files plus a layered `swarmforge/constitution.prompt`
+- Supports per-role backends such as `claude` or `codex`
+- Creates a project-local `swarmtools/` directory with notification helpers for the active swarm
+- Creates one git worktree per configured role under `.worktrees/`
+- Initializes a git repository in a new working directory and creates a first commit with `logs/` and `agent_context/` ignored
+- Keeps all swarm state local to the working directory in `.swarmforge/`
 
-## Getting started
+## Core Features
 
-**Build:**
-```
-dotnet build ChessOverlay.slnx
-```
+- **Config-Driven Topology** — The swarm shape comes from `swarmforge/swarmforge.conf`, not hardcoded shell variables.
+- **Project-Local Roles** — Each role is defined by `swarmforge/<role>.prompt` in the working tree being orchestrated.
+- **Layered Constitution** — `swarmforge/constitution.prompt` can delegate to subordinate files such as `swarmforge/constitution/project.prompt`, `engineering.prompt`, and `workflow.prompt`.
+- **Backend Selection Per Role** — A role can launch `claude` or `codex`.
+- **Observable Swarm** — Open one Terminal window per role and watch the sessions in real time.
+- **Self-Hosted & Lightweight** — Runs locally in tmux and Terminal with minimal machinery.
 
-**Run:**
-```
-dotnet run --project ChessOverlay
-```
+## Constitution And Roles
 
-On first launch, press **Ctrl+Shift+B** to open the board selection dialog and drag a rectangle around your chessboard. The selection is saved automatically for future sessions.
+In a configuration with an `architect`, `coder`, and `reviewer`, the recommended prompt layout is:
 
-## Piece templates
-
-The app uses template matching to identify pieces on screen. Templates are PNG images in a `templates/` folder next to the binary, named like `white_king.png` / `black_pawn.png` (or short form `wK.png` / `bP.png`).
-
-If no templates are found, the overlay will not display piece data. You can either supply your own templates or use `--calibrate` to auto-generate them from the starting position on first run.
-
-## Keyboard shortcuts
-
-| Shortcut | Action |
-|---|---|
-| Ctrl+Shift+B | Open board selection dialog |
-| Ctrl+Shift+O | Toggle overlay on/off |
-
-## CLI options
-
-```
-dotnet run --project ChessOverlay -- [options]
-
---demo                     Auto-position board in screen center (for testing)
---board <left,top,size>    Set board geometry in pixels (e.g. 100,150,640)
---fen <fen-string>         Load a fixed board state from a FEN string
---piece-templates <path>   Path to folder containing piece template images
---calibrate                Auto-generate templates from starting position
---timing                   Print performance metrics to debug output
+```text
+swarmforge/
+  swarmforge.conf
+  constitution.prompt
+  constitution/
+    project.prompt
+    engineering.prompt
+    workflow.prompt
+  architect.prompt
+  coder.prompt
+  reviewer.prompt
 ```
 
-## How it works
+`constitution.prompt` is the entry point. It can define precedence and direct agents to read subordinate constitution files in order. That lets you separate project-specific rules from engineering rules and workflow rules without forcing everything into one large prompt.
 
-1. A timer fires every 500 ms and captures the screen region defined by the board geometry.
-2. Each square is compared against piece templates using normalized cross-correlation.
-3. The reading is accepted only if the overall confidence score exceeds 0.45.
-4. The top-side player is identified as the enemy by computing the mean rank of all pieces — whoever sits higher on screen is on top.
-5. Attack rays are calculated for every enemy piece and the overlay is repainted.
+The default three-agent workflow is:
 
-## Development
+- `architect` defines behavior, plans, and acceptance-level intent
+- `coder` implements one small slice at a time and hands off completed work
+- `reviewer` performs deeper verification and quality checks before final handoff
 
-**Run tests:**
+## How It Works (High Level)
+
+1. Create a `swarmforge/` directory in the target working directory.
+2. Put `swarmforge.conf`, `constitution.prompt`, and one `<role>.prompt` file per configured role inside it. If needed, add subordinate files under `swarmforge/constitution/`.
+3. In `swarmforge/swarmforge.conf`, define each window as `window <role> <agent> <worktree>`.
+4. Add `swarmforge.sh` to your shell `PATH` before startup.
+5. Run `swarmforge.sh <working-directory>` or run it from inside that directory.
+6. If the working directory is not already a git repo, startup runs `git init`, renames the initial branch to `master`, writes `.gitignore` entries for `.swarmforge/`, `.worktrees/`, `swarmtools/`, `logs/`, and `agent_context/`, and makes the first commit from the current project state.
+7. Startup creates a git worktree for each window under `.worktrees/<worktree>`, unless the worktree field is `none` or `master`.
+8. Startup creates `swarmtools/notify-agent.sh` for that project.
+9. SwarmForge creates tmux sessions, opens Terminal windows, and launches each configured backend in its assigned worktree.
+10. Roles communicate through helper commands such as `notify-agent.sh <role> --file <message-file>`.
+
+## The `swarmforge.conf` File
+
+`swarmforge/swarmforge.conf` defines the swarm window-by-window. Each line has this form:
+
+```conf
+window <role> <agent> <worktree>
 ```
-dotnet test ChessOverlay.Tests
+
+You can define as many windows as your project needs. Each `role` maps to a corresponding prompt file at `swarmforge/<role>.prompt`, so a config containing `architect`, `coder`, `reviewer`, `research`, and `release` windows would expect:
+
+- `swarmforge/architect.prompt`
+- `swarmforge/coder.prompt`
+- `swarmforge/reviewer.prompt`
+- `swarmforge/research.prompt`
+- `swarmforge/release.prompt`
+
+This lets each project choose its own swarm shape instead of being locked to a fixed set of roles.
+
+The first window in the config is the cleanup window. SwarmForge attaches shutdown cleanup to that window's launch command and falls back to that tmux session when Terminal automation is unavailable.
+
+When SwarmForge opens Terminal windows, it also starts a small window watchdog:
+
+- Closing a non-cleanup Terminal window reopens that window attached to the same tmux session.
+- Closing the cleanup Terminal window shuts down all configured tmux sessions and closes the remaining tracked Terminal windows.
+- The watchdog updates `.swarmforge/window-ids` when it reopens a window so shutdown cleanup still targets the current windows.
+
+Example config:
+
+```conf
+window coordinator codex master
+window coder codex coder
+window refactorer codex refactorer
+window architect codex architect
 ```
 
-**Run code quality analysis** (DRY duplication, CRAP complexity, architecture view):
-```
-dotnet run --project ChessOverlay.Quality
-```
+In the example above, the agents run in these worktrees:
 
-## Project structure
+- `coordinator` -> main working directory on `master`, and is the cleanup window because it is listed first
+- `coder` -> `.worktrees/coder`
+- `refactorer` -> `.worktrees/refactorer`
+- `architect` -> `.worktrees/architect`
 
-```
-ChessOverlay/           Main WinForms application (F#, net10.0-windows)
-ChessOverlay.Tests/     XUnit test suite
-ChessOverlay.Quality/   Static analysis tools (DRY, CRAP, architecture)
-specification.md        Product requirements and acceptance criteria
-```
+If a window uses `master` as its worktree name, SwarmForge does not create `.worktrees/master`; that role runs in the main working directory on the `master` branch.
 
-## License
+## Examples
 
-MIT
+The repository includes example swarm definitions under `examples/`.
+
+- `examples/clojureHTW/swarmforge/` shows a layered constitution and agent prompts for a Clojure Hunt The Wumpus project, including a queueing rule for messages that arrive while an agent is busy.
+
+Use these example directories as starting points for project-local `swarmforge/` folders.
+
+## Getting Started
+
+- In the directory where you want to use SwarmForge, pull the repository contents without creating a Git remote:
+
+  ```sh
+  curl -L https://github.com/unclebob/swarm-forge/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1
+  ```
+	
+## Running SwarmForge
+
+Just type `swarm`. The windows should all pop up.
