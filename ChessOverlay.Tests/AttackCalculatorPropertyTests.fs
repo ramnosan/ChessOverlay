@@ -11,29 +11,13 @@ module AttackCalculatorPropertyTests =
     module A = FsCheck.FSharp.Arb
     module P = FsCheck.FSharp.Prop
 
-    let genSquare = gen {
-        let! file = G.choose (0, 7)
-        let! rank = G.choose (0, 7)
-        return { File = file; Rank = rank }
-    }
-
-    let genPieceColor = G.elements [White; Black]
-
-    let genPieceKind = G.elements [Pawn; Knight; Bishop; Rook; Queen; King]
-
-    let genPiece = gen {
-        let! color = genPieceColor
-        let! kind = genPieceKind
-        return { Color = color; Kind = kind }
-    }
-
     let genBoardState =
         gen {
             let! pieceCount = G.choose (3, 16)
             let! shuffledSquares =
                 G.shuffle Squares.all
                 |> G.map (Array.toList >> List.truncate pieceCount)
-            let! pieces = G.arrayOfLength pieceCount genPiece
+            let! pieces = G.arrayOfLength pieceCount Generators.genPiece
             let board = List.zip shuffledSquares (List.ofArray pieces) |> Map.ofList
             return board
         }

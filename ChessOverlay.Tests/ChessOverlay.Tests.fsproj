@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="TestHelpers.fs" />
     <Compile Include="DomainTests.fs" />
+    <Compile Include="DomainPropertyTests.fs" />
     <Compile Include="AttackCalculatorTests.fs" />
     <Compile Include="AttackCalculatorPropertyTests.fs" />
     <Compile Include="BoardReaderTests.fs" />

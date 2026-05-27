@@ -74,7 +74,7 @@ module ChromeBoardDetector =
         tryGetString tab "webSocketDebuggerUrl" |> Option.map (fun wsUrl ->
             { Id = id; Title = title; Url = url; WebSocketUrl = wsUrl }))))
 
-    let private tryParseTab (tab: JsonElement) =
+    let internal tryParseTab (tab: JsonElement) =
         if tryGetString tab "type" = Some "page" then tryBuildTab tab else None
 
     let private tryListTabs () =
