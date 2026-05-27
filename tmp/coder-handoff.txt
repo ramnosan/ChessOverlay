@@ -1,0 +1,8 @@
+Re-read your role and constitution.
+
+Sender role: specifier
+Specifier handoff name: chrome-fen-reader
+Branch name: master
+Commit hash: f3fd354
+
+Apply your own role rules to this state.
