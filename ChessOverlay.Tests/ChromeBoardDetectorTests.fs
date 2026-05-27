@@ -43,6 +43,29 @@ module ChromeBoardDetectorTests =
         Assert.Equal(None, parseTab json)
 
     [<Fact>]
+    let ``parseFen extracts the FEN string from a CDP evaluate response`` () =
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        let json = sprintf """{"id":1,"result":{"result":{"type":"string","value":"%s"}}}""" fen
+        Assert.Equal(Some fen, ChromeBoardDetector.parseFen json)
+
+    [<Fact>]
+    let ``parseFen returns None when CDP result is null (no chess board)`` () =
+        Assert.Equal(None, ChromeBoardDetector.parseFen """{"id":1,"result":{"result":{"type":"null"}}}""")
+
+    [<Fact>]
+    let ``parseFen returns None when the value is not a string`` () =
+        Assert.Equal(None, ChromeBoardDetector.parseFen """{"id":1,"result":{"result":{"value":12345}}}""")
+
+    [<Fact>]
+    let ``parseFen returns None when the result field is missing`` () =
+        Assert.Equal(None, ChromeBoardDetector.parseFen """{"id":1}""")
+
+    [<Fact>]
+    let ``parseFen returns None for malformed JSON`` () =
+        Assert.Equal(None, ChromeBoardDetector.parseFen "not json")
+        Assert.Equal(None, ChromeBoardDetector.parseFen "")
+
+    [<Fact>]
     let ``parseGeometry returns None for malformed JSON`` () =
         Assert.Equal(None, ChromeBoardDetector.parseGeometry "not json")
         Assert.Equal(None, ChromeBoardDetector.parseGeometry "")

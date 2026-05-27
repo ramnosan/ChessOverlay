@@ -3,15 +3,19 @@ namespace ChessOverlay
 open System.Diagnostics.CodeAnalysis
 open System.Drawing
 
+module BoardReaderHelpers =
+    /// Builds a fully-confident reading from a FEN string, or None when the FEN is invalid.
+    let readingFromFen (fen: string) : BoardReading option =
+        match Fen.parseBoard fen with
+        | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
+        | Error _ -> None
+
 type IBoardReader =
     abstract Read: Bitmap * BoardGeometry -> BoardReading option
 
 type FenBoardReader(fen: string) =
     interface IBoardReader with
-        member _.Read(_, _) =
-            match Fen.parseBoard fen with
-            | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
-            | Error _ -> None
+        member _.Read(_, _) = BoardReaderHelpers.readingFromFen fen
 
 type UncertainBoardReader() =
     interface IBoardReader with
