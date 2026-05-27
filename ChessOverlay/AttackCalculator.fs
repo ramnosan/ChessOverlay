@@ -370,8 +370,10 @@ module AttackCalculator =
     let private enemyForksForColor board enemy =
         let friendly = oppositeColor enemy
         let undefendedFriendly = undefendedSquaresFor board friendly -1
+        let friendlyAttacks = attackedSquaresByColorWithDir board friendly -1
 
         piecesOfColor board enemy
+        |> Seq.filter (fun (square, _) -> not (Set.contains square friendlyAttacks))
         |> Seq.choose (fun (square, piece) -> forkForPiece board undefendedFriendly square piece)
         |> Seq.toList
 

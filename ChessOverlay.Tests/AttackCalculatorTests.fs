@@ -121,9 +121,10 @@ module AttackCalculatorTests =
     [<Fact>]
     let ``enemyForks reports a knight attacking two friendly pieces`` () =
         // Black knight on d7 (file=3, rank=1) sits on top (enemy); two white
-        // knights on c5/e5 (rank=3) are both attacked and do not defend each
-        // other, so both are hanging.
-        let board = parse "8/3n4/8/2N1N3/8/8/8/8 w - - 0 1"
+        // bishops on c5/e5 (rank=3) are both attacked and cannot defend each
+        // other, so both are hanging. Bishops are used so no white piece can
+        // reach the black knight and trigger the fork-validity filter.
+        let board = parse "8/3n4/8/2B1B3/8/8/8/8 w - - 0 1"
         let forks = AttackCalculator.enemyForks board
 
         Assert.Equal(1, forks.Length)
@@ -133,15 +134,17 @@ module AttackCalculatorTests =
 
     [<Fact>]
     let ``enemyForks reports a sliding piece forking along two rays`` () =
-        // Black rook on d7 (file=3, rank=1): white rooks on its file (d3) and
-        // rank (g7) are the farthest pieces it attacks along each ray.
-        let board = parse "8/3r2R1/8/8/8/3R4/8/8 w - - 0 1"
+        // Black bishop on d8 (file=3, rank=0): white rooks on e7 (file=4, rank=1)
+        // and b6 (file=1, rank=2) are the first pieces it sees on each diagonal
+        // ray. White rooks cannot reach d8 via file or rank, so the bishop is not
+        // capturable and the fork is valid.
+        let board = parse "3b4/4R3/1R6/8/8/8/8/8 w - - 0 1"
         let forks = AttackCalculator.enemyForks board
 
         Assert.Equal(1, forks.Length)
         let forker, forked = List.head forks
-        Assert.Equal({ File = 3; Rank = 1 }, forker)
-        Assert.Equal<Set<Square>>(set [ { File = 3; Rank = 5 }; { File = 6; Rank = 1 } ], forked)
+        Assert.Equal({ File = 3; Rank = 0 }, forker)
+        Assert.Equal<Set<Square>>(set [ { File = 4; Rank = 1 }; { File = 1; Rank = 2 } ], forked)
 
     [<Fact>]
     let ``enemyForks ignores a piece attacking only one friendly piece`` () =
@@ -171,16 +174,38 @@ module AttackCalculatorTests =
 
     [<Fact>]
     let ``enemyForks counts only the undefended pieces in a mixed fork`` () =
-        // Black knight on d7 attacks white knights on c5/e5 (undefended) plus a
-        // white pawn on f6 that a white rook on f3 defends. The defended pawn is
-        // excluded, leaving the two knights as the fork.
-        let board = parse "8/3n4/5P2/2N1N3/8/5R2/8/8 w - - 0 1"
+        // Black knight on d7 (file=3, rank=1) attacks white bishops on c5/e5
+        // (undefended) plus a white rook on f6 (file=5, rank=2) defended by a
+        // white rook on f1 (file=5, rank=7). The defended rook is excluded, leaving
+        // the two bishops as the fork. Bishops are used so no white piece can reach
+        // d7 and trigger the fork-validity filter.
+        let board = parse "8/3n4/5R2/2B1B3/8/8/8/5R2 w - - 0 1"
         let forks = AttackCalculator.enemyForks board
 
         Assert.Equal(1, forks.Length)
         let forker, forked = List.head forks
         Assert.Equal({ File = 3; Rank = 1 }, forker)
         Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
+
+    // fork-validity-filter-001
+    [<Fact>]
+    let ``enemyForks does not highlight fork when the forking piece can be captured`` () =
+        // Black knight on d7 (file=3, rank=1) attacks two undefended white knights
+        // on c5/e5, but the white knight on c5 can immediately take the black knight.
+        // Resolving the fork by capturing the forking piece, so the fork is not shown.
+        let board = parse "8/3n4/8/2N1N3/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.enemyForks board)
+
+    // fork-validity-filter-002
+    [<Fact>]
+    let ``enemyForks highlights fork when the forking piece cannot be captured`` () =
+        // Black knight on d7 (file=3, rank=1) attacks white bishops on c5/e5.
+        // Bishops cannot reach d7, so the fork is a genuine threat.
+        let board = parse "8/3n4/8/2B1B3/8/8/8/8 w - - 0 1"
+        let forks = AttackCalculator.enemyForks board
+        Assert.Equal(1, forks.Length)
+        let forker, _ = List.head forks
+        Assert.Equal({ File = 3; Rank = 1 }, forker)
 
     [<Fact>]
     let ``hangingSquares returns empty for an empty board`` () =
