@@ -167,25 +167,24 @@ module AttackCalculatorTests =
     [<Fact>]
     let ``enemyForks ignores mutually defended equal value targets`` () =
         // enemyForks reports only forks against hanging or profitably attacked
-        // pieces. These rooks defend each other along the 5th rank, so Nxc5 or
-        // Nxe5 would be recaptured by the other rook.
-        let board = parse "8/3n4/8/2R1R3/8/8/8/8 w - - 0 1"
+        // pieces. The black rook attacks two defended white rooks, but trading
+        // rook for rook does not win material in the worst case.
+        let board = parse "8/3r2R1/8/3R2R1/8/8/8/8 w - - 0 1"
         Assert.Empty(AttackCalculator.enemyForks board)
 
     [<Fact>]
-    let ``enemyForks counts only the undefended pieces in a mixed fork`` () =
+    let ``enemyForks includes defended targets when the forker wins material`` () =
         // Black knight on d7 (file=3, rank=1) attacks white bishops on c5/e5
         // (undefended) plus a white rook on f6 (file=5, rank=2) defended by a
-        // white rook on f1 (file=5, rank=7). The defended rook is excluded, leaving
-        // the two bishops as the fork. Bishops are used so no white piece can reach
-        // d7 and trigger the fork-validity filter.
+        // white rook on f1 (file=5, rank=7). The defended rook is still included
+        // because winning a rook for a knight is material-positive.
         let board = parse "8/3n4/5R2/2B1B3/8/8/8/5R2 w - - 0 1"
         let forks = AttackCalculator.enemyForks board
 
         Assert.Equal(1, forks.Length)
         let forker, forked = List.head forks
         Assert.Equal({ File = 3; Rank = 1 }, forker)
-        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
+        Assert.Equal<Set<Square>>(set [ { File = 5; Rank = 2 }; { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
 
     // fork-validity-filter-001
     [<Fact>]
@@ -206,6 +205,28 @@ module AttackCalculatorTests =
         Assert.Equal(1, forks.Length)
         let forker, _ = List.head forks
         Assert.Equal({ File = 3; Rank = 1 }, forker)
+
+    [<Fact>]
+    let ``enemyForks highlights defended fork when capture of forking piece loses material`` () =
+        // The black knight on d7 forks two loose rooks. White's queen attacks d7,
+        // but the black rook on d8 protects the knight, so Qxd7 loses the queen
+        // for a knight and does not refute the fork in the worst case.
+        let board = parse "3r4/3n4/8/2R1R3/8/8/3Q4/8 w - - 0 1"
+        let forks = AttackCalculator.enemyForks board
+
+        Assert.Equal(1, forks.Length)
+        let forker, forked = List.head forks
+        Assert.Equal({ File = 3; Rank = 1 }, forker)
+        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 3 }; { File = 4; Rank = 3 } ], forked)
+
+    [<Fact>]
+    let ``enemyForks rejects defended fork when a lower value piece can win the forker`` () =
+        // The black queen attacks two loose rooks, but the white bishop on g6 can
+        // capture it on d3. Even though the queen is protected by a rook on d8,
+        // losing a queen for a bishop is a bad worst case, so it is not effective.
+        let board = parse "3r4/8/6B1/2R1R3/8/3q4/8/8 w - - 0 1"
+
+        Assert.Empty(AttackCalculator.enemyForks board)
 
     [<Fact>]
     let ``hangingSquares returns empty for an empty board`` () =
@@ -490,6 +511,17 @@ module AttackCalculatorTests =
         let arrows = AttackCalculator.friendlyForkMoveArrows board
 
         Assert.DoesNotContain(({ File = 3; Rank = 3 }, { File = 2; Rank = 1 }), arrows)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows rejects equal recapture of defended forking knight`` () =
+        // Regression for Nxd4+ ...Bxd4 patterns: the knight captures a knight
+        // and checks the king while also attacking a bishop, but the bishop on
+        // b6 can recapture the landing square. Even though d4 is defended by
+        // the rook, the worst case is not a material-winning fork.
+        let board = parse "8/8/1bk5/5b2/3n4/5N2/8/3R2K1 w - - 0 1"
+        let arrows = AttackCalculator.friendlyForkMoveArrows board
+
+        Assert.DoesNotContain(({ File = 5; Rank = 5 }, { File = 3; Rank = 4 }), arrows)
 
     [<Fact>]
     let ``enemyForkMoveArrows returns empty for an empty board`` () =

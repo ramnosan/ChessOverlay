@@ -296,7 +296,7 @@ module AttackCalculator =
             |> Map.add toSquare attacker
 
         kingSafeAfterCapture boardAfterCapture capturerColor forkerColor forkerPawnDelta
-        && (not forkerDefendsSquare || pieceValue piece > pieceValue attacker)
+        && (not forkerDefendsSquare || pieceValue attacker <= pieceValue piece)
 
     let private pieceIsSafeAfterMove board fromSquare toSquare piece forkerColor forkerPawnDelta capturerColor capturerPawnDelta =
         let movedBoard = boardAfterMove board fromSquare toSquare piece
@@ -357,38 +357,24 @@ module AttackCalculator =
     let friendlyForkMoveArrows (board: BoardState) : (Square * Square) list =
         forkMoveArrowsCore board (fun _ f -> f)
 
-    // A fork is a single enemy (top) piece that attacks two or more *undefended*
-    // friendly pieces at once. Defended pieces are excluded: if their defender
-    // can recapture, the enemy wins no material, so it isn't a real fork. Each
-    // result pairs the forking square with the undefended friendly squares it
-    // hits. Sliding pieces "attack" the piece on a ray because attacksForPiece
-    // includes the blocker square.
-    let private undefendedSquaresFor board targetColor defenderPawnRankDelta =
-        let defended = attackedSquaresByColorWithDir board targetColor defenderPawnRankDelta
+    // A fork is a single enemy (top) piece that attacks two or more friendly
+    // pieces that are hanging or profitably attacked. The forking piece must
+    // also survive the same material-aware safety check used for fork moves:
+    // if the best capture of the forker wins material, the fork is not shown.
+    let private forkedTargets board vulnerableTargets square piece =
+        Set.intersect (attacksForPiece board square piece) vulnerableTargets
 
-        piecesOfColor board targetColor
-        |> Seq.choose (fun (square, _) ->
-            if not (Set.contains square defended) then
-                Some square
-            else
-                None)
-        |> Set.ofSeq
-
-    let private forkedTargets board undefendedTargets square piece =
-        Set.intersect (attacksForPiece board square piece) undefendedTargets
-
-    let private forkForPiece board undefendedTargets square piece =
-        let forked = forkedTargets board undefendedTargets square piece
+    let private forkForPiece board vulnerableTargets square piece =
+        let forked = forkedTargets board vulnerableTargets square piece
         if Set.count forked >= 2 then Some(square, forked) else None
 
     let private enemyForksForColor board enemy =
         let friendly = oppositeColor enemy
-        let undefendedFriendly = undefendedSquaresFor board friendly -1
-        let friendlyAttacks = attackedSquaresByColorWithDir board friendly -1
+        let vulnerableFriendly = hangingSquaresFor board friendly -1 enemy 1
 
         piecesOfColor board enemy
-        |> Seq.filter (fun (square, _) -> not (Set.contains square friendlyAttacks))
-        |> Seq.choose (fun (square, piece) -> forkForPiece board undefendedFriendly square piece)
+        |> Seq.filter (fun (square, piece) -> pieceIsSafeAfterMove board square square piece enemy 1 friendly -1)
+        |> Seq.choose (fun (square, piece) -> forkForPiece board vulnerableFriendly square piece)
         |> Seq.toList
 
     let enemyForks (board: BoardState) : (Square * Set<Square>) list =
