@@ -160,11 +160,16 @@ module Program =
             |> Option.exists (String.IsNullOrWhiteSpace >> not))
         |> Option.flatten
 
+    let private createChromeFallbackReader templatesPath =
+        let template, warning = createTemplateReader templatesPath
+        let chrome = ChromeBoardDetector.ChromeFenReader() :> IBoardReader
+        FallbackBoardReader(chrome, template) :> IBoardReader, warning
+
     let private createReaderFromFen options environmentFen =
         match configuredFen options environmentFen with
         | Some value -> createFenReader value
         | None when options.IsDemo -> createFenReader startingFen
-        | None -> createTemplateReader "templates"
+        | None -> createChromeFallbackReader "templates"
 
     let createReader options environmentFen =
         if shouldUseTemplates options then

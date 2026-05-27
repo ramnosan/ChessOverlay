@@ -149,14 +149,16 @@ module ChromeBoardDetector =
         with _ ->
             None
 
-    let tryDetectBoardInTab (tab: ChromeTab) =
+    let private evalAndParse (script: string) (parse: string -> 'a option) (tab: ChromeTab) =
         async {
             try
-                let! response = sendEvaluate tab.WebSocketUrl detectionScript
-                return parseGeometry response
+                let! response = sendEvaluate tab.WebSocketUrl script
+                return parse response
             with _ ->
                 return None
         }
+
+    let tryDetectBoardInTab (tab: ChromeTab) = evalAndParse detectionScript parseGeometry tab
 
     let private detectBoardInTab (tab: ChromeTab) =
         async {
@@ -184,3 +186,51 @@ module ChromeBoardDetector =
             else
                 return! detectFromTabs tabs.Value
         }
+
+    // Reads the current FEN from a chess.com chess-board element via the game object.
+    let private fenScript =
+        """(() => {
+            try {
+                const cb = document.querySelector('chess-board');
+                if (!cb) return null;
+                const g = cb.game;
+                if (!g) return null;
+                if (typeof g.getFen === 'function') return g.getFen();
+                if (typeof g.fen === 'function') return g.fen();
+                if (typeof g.fen === 'string') return g.fen;
+                return null;
+            } catch (e) { return null; }
+        })()"""
+
+    let internal parseFen (response: string) =
+        try
+            use doc = JsonDocument.Parse response
+            tryGet doc.RootElement "result" |> Option.bind (fun r1 ->
+                tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind (fun v ->
+                    if v.ValueKind = JsonValueKind.String then Some(v.GetString()) else None))
+        with _ ->
+            None
+
+    let private isChessSiteTab (tab: ChromeTab) =
+        tab.Url.Contains("chess.com/")
+
+    let private tryReadFenFromTab (tab: ChromeTab) = evalAndParse fenScript parseFen tab
+
+    type ChromeFenReader() =
+        interface IBoardReader with
+            member _.Read(_, _) =
+                async {
+                    match! tryListTabs () with
+                    | None -> return None
+                    | Some tabs ->
+                        let chessTabs = tabs |> List.filter isChessSiteTab
+                        let! fens = chessTabs |> List.map tryReadFenFromTab |> Async.Parallel
+                        return
+                            fens
+                            |> Array.tryPick id
+                            |> Option.bind (fun fen ->
+                                match Fen.parseBoard fen with
+                                | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
+                                | Error _ -> None)
+                }
+                |> Async.RunSynchronously

@@ -17,6 +17,13 @@ type UncertainBoardReader() =
     interface IBoardReader with
         member _.Read(_, _) = None
 
+type FallbackBoardReader(primary: IBoardReader, fallback: IBoardReader) =
+    interface IBoardReader with
+        member _.Read(bitmap, geometry) =
+            match primary.Read(bitmap, geometry) with
+            | Some r -> Some r
+            | None -> fallback.Read(bitmap, geometry)
+
 [<ExcludeFromCodeCoverage>]
 module ScreenCapture =
     let captureVirtualScreen () =
