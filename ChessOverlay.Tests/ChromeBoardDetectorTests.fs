@@ -1,5 +1,6 @@
 namespace ChessOverlay.Tests
 
+open System.Text.Json
 open System.Windows.Forms
 open Xunit
 open ChessOverlay
@@ -8,6 +9,38 @@ module ChromeBoardDetectorTests =
 
     let private vsLeft = SystemInformation.VirtualScreen.Left
     let private vsTop = SystemInformation.VirtualScreen.Top
+
+    let private parseTab (json: string) =
+        use doc = JsonDocument.Parse json
+        ChromeBoardDetector.tryParseTab doc.RootElement
+
+    [<Fact>]
+    let ``tryParseTab builds a tab from a complete page entry`` () =
+        let tab =
+            parseTab
+                """{"type":"page","id":"AB12","title":"lichess","url":"https://lichess.org/x","webSocketDebuggerUrl":"ws://localhost:9222/devtools/page/AB12"}"""
+
+        let expected: ChromeBoardDetector.ChromeTab =
+            { Id = "AB12"
+              Title = "lichess"
+              Url = "https://lichess.org/x"
+              WebSocketUrl = "ws://localhost:9222/devtools/page/AB12" }
+
+        Assert.Equal(Some expected, tab)
+
+    [<Fact>]
+    let ``tryParseTab ignores entries whose type is not page`` () =
+        let json =
+            """{"type":"background_page","id":"BG","title":"bg","url":"chrome://x","webSocketDebuggerUrl":"ws://localhost:9222/devtools/page/BG"}"""
+
+        Assert.Equal(None, parseTab json)
+
+    [<Fact>]
+    let ``tryParseTab returns None when the debugger URL is missing`` () =
+        let json =
+            """{"type":"page","id":"NoWs","title":"t","url":"https://chess.com"}"""
+
+        Assert.Equal(None, parseTab json)
 
     [<Fact>]
     let ``parseGeometry returns None for malformed JSON`` () =

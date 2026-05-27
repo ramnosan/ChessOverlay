@@ -68,12 +68,18 @@ module AttackCalculator =
     let private slidingDirectionMap =
         Map.ofList [ Bishop, bishopDirections; Rook, rookDirections; Queen, queenDirections ]
 
+    // Non-pawn stepping pieces map straight to a ray generator. Pawns stay
+    // separate because their rays depend on the runtime pawnRankDelta.
+    let private stepRayMap =
+        Map.ofList [ Knight, knightRays; King, kingRays ]
+
     let private stepRaysForPiece square piece pawnRankDelta =
         match piece.Kind with
         | Pawn -> pawnRaysWithDir pawnRankDelta square
-        | Knight -> knightRays square
-        | King -> kingRays square
-        | Bishop | Rook | Queen -> []
+        | kind ->
+            Map.tryFind kind stepRayMap
+            |> Option.map (fun rays -> rays square)
+            |> Option.defaultValue []
 
     let attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
         match Map.tryFind piece.Kind slidingDirectionMap with
