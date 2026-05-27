@@ -54,6 +54,21 @@ module ChromeBoardDetector =
             };
         })()"""
 
+    // Reads the current FEN from a chess.com chess-board element via the game object.
+    let private fenScript =
+        """(() => {
+            try {
+                const cb = document.querySelector('chess-board');
+                if (!cb) return null;
+                const g = cb.game;
+                if (!g) return null;
+                if (typeof g.getFen === 'function') return g.getFen();
+                if (typeof g.fen === 'function') return g.fen();
+                if (typeof g.fen === 'string') return g.fen;
+                return null;
+            } catch (e) { return null; }
+        })()"""
+
     // Explicit string overload annotation avoids F# ambiguity with ReadOnlySpan overloads.
     let private tryGet (el: JsonElement) (name: string) =
         let ok, v = el.TryGetProperty name
@@ -187,21 +202,6 @@ module ChromeBoardDetector =
                 return! detectFromTabs tabs.Value
         }
 
-    // Reads the current FEN from a chess.com chess-board element via the game object.
-    let private fenScript =
-        """(() => {
-            try {
-                const cb = document.querySelector('chess-board');
-                if (!cb) return null;
-                const g = cb.game;
-                if (!g) return null;
-                if (typeof g.getFen === 'function') return g.getFen();
-                if (typeof g.fen === 'function') return g.fen();
-                if (typeof g.fen === 'string') return g.fen;
-                return null;
-            } catch (e) { return null; }
-        })()"""
-
     let internal parseFen (response: string) =
         try
             use doc = JsonDocument.Parse response
@@ -228,9 +228,6 @@ module ChromeBoardDetector =
                         return
                             fens
                             |> Array.tryPick id
-                            |> Option.bind (fun fen ->
-                                match Fen.parseBoard fen with
-                                | Ok board -> Some { Board = board; Confidence = 1.0; Candidates = Map.empty }
-                                | Error _ -> None)
+                            |> Option.bind BoardReaderHelpers.readingFromFen
                 }
                 |> Async.RunSynchronously
