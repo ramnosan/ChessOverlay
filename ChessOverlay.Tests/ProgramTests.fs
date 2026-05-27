@@ -141,7 +141,7 @@ module ProgramTests =
 
         Assert.IsType<FenBoardReader>(demoReader) |> ignore
         Assert.True(demoWarning.IsNone)
-        Assert.IsType<UncertainBoardReader>(defaultReader) |> ignore
+        Assert.IsType<FallbackBoardReader>(defaultReader) |> ignore
         Assert.Equal(Some "No templates found in 'templates'", defaultWarning)
 
     [<Fact>]
