@@ -65,14 +65,19 @@ module AttackCalculator =
         |> List.map (fun (fileDelta, rankDelta) -> rayLine board square fileDelta rankDelta)
         |> List.filter (not << List.isEmpty)
 
-    let attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
+    let private slidingDirectionMap =
+        Map.ofList [ Bishop, bishopDirections; Rook, rookDirections; Queen, queenDirections ]
+
+    let private stepRaysForPiece square piece pawnRankDelta =
         match piece.Kind with
         | Pawn -> pawnRaysWithDir pawnRankDelta square
         | Knight -> knightRays square
-        | Bishop -> slidingRays board square bishopDirections
-        | Rook -> slidingRays board square rookDirections
-        | Queen -> slidingRays board square queenDirections
-        | King -> kingRays square
+        | _ -> kingRays square
+
+    let attackRaysForPieceWithDir board square piece pawnRankDelta : Square list list =
+        match Map.tryFind piece.Kind slidingDirectionMap with
+        | Some directions -> slidingRays board square directions
+        | None -> stepRaysForPiece square piece pawnRankDelta
 
     let attackRaysForPiece board square piece : Square list list =
         attackRaysForPieceWithDir board square piece 1
@@ -107,15 +112,21 @@ module AttackCalculator =
         | [] -> None
         | _ -> Some(List.average ranks)
 
+    // Rank 0 is the top of the screen, so the colour with the lower mean rank
+    // is on top. Use 8.0 (off-board) as a sentinel for an absent colour so
+    // a present colour always has a lower rank than an absent one.
+    let private colorAtTop board =
+        let wr = meanRank White board |> Option.defaultValue 8.0
+        let br = meanRank Black board |> Option.defaultValue 8.0
+        if wr <= br then White else Black
+
     // The top player is always the enemy, but they may be either colour (the
-    // user plays both sides). Rank 0 is the top of the screen, so the colour
-    // whose pieces sit at the lower mean rank is the side on top.
+    // user plays both sides).
     let enemyColor (board: BoardState) : PieceColor option =
         match meanRank White board, meanRank Black board with
-        | Some white, Some black -> Some(if white <= black then White else Black)
-        | Some _, None -> Some White
-        | None, Some _ -> Some Black
         | None, None -> None
+        | Some _, None -> Some White
+        | _ -> Some(colorAtTop board)
 
     let enemyAttackedSquares (board: BoardState) =
         match enemyColor board with
@@ -139,14 +150,10 @@ module AttackCalculator =
             |> Seq.collect (fun (square, piece) -> pieceArrows board square piece)
             |> Seq.toList)
 
-    let private pieceValue piece =
-        match piece.Kind with
-        | Pawn -> 1
-        | Knight
-        | Bishop -> 3
-        | Rook -> 5
-        | Queen -> 9
-        | King -> 100
+    let private pieceValueMap =
+        Map.ofList [ Pawn, 1; Knight, 3; Bishop, 3; Rook, 5; Queen, 9; King, 100 ]
+
+    let private pieceValue piece = Map.find piece.Kind pieceValueMap
 
     let private piecesAttackingSquare board attackerColor attackerPawnRankDelta square =
         board

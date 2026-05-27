@@ -98,14 +98,10 @@ module PieceBitmap =
 module PieceTemplateCalibration =
     let private startingPosition = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
-    let private kindName piece =
-        match piece.Kind with
-        | King -> "king"
-        | Queen -> "queen"
-        | Rook -> "rook"
-        | Bishop -> "bishop"
-        | Knight -> "knight"
-        | Pawn -> "pawn"
+    let private kindNames =
+        Map.ofList [ King, "king"; Queen, "queen"; Rook, "rook"; Bishop, "bishop"; Knight, "knight"; Pawn, "pawn" ]
+
+    let private kindName piece = Map.find piece.Kind kindNames
 
     let private templateFileName piece square =
         let color = match piece.Color with Black -> "black" | White -> "white"
@@ -141,6 +137,16 @@ module BackgroundIsolation =
 
     let private luminance (r: float) (g: float) (b: float) = (r + g + b) / 3.0
 
+    let private scanForTransparentPixel (bytes: byte[]) =
+        let mutable found = false
+        let mutable i = 3
+
+        while not found && i < bytes.Length do
+            if bytes[i] < 250uy then found <- true
+            i <- i + 4
+
+        found
+
     let hasTransparency (bitmap: Bitmap) : bool =
         if not (Image.IsAlphaPixelFormat bitmap.PixelFormat) then
             false
@@ -151,26 +157,17 @@ module BackgroundIsolation =
             try
                 let bytes = Array.zeroCreate<byte> (data.Stride * bitmap.Height)
                 Marshal.Copy(data.Scan0, bytes, 0, bytes.Length)
-
-                let mutable found = false
-                let mutable i = 3
-
-                while not found && i < bytes.Length do
-                    if bytes[i] < 250uy then found <- true
-                    i <- i + 4
-
-                found
+                scanForTransparentPixel bytes
             finally
                 bitmap.UnlockBits(data)
 
-    let private enqueueIfBackground
-        (x: int)
-        (y: int)
-        (w: int)
-        (isBackground: int -> int -> bool)
-        (visited: bool[])
-        (queue: System.Collections.Generic.Queue<struct (int * int)>)
-        =
+    let private enqueueIfBackground (x: int)
+            (y: int)
+            (w: int)
+            (isBackground: int -> int -> bool)
+            (visited: bool[])
+            (queue: System.Collections.Generic.Queue<struct (int * int)>)
+            =
         let p = y * w + x
         if not visited[p] && isBackground x y then
             visited[p] <- true
@@ -184,13 +181,12 @@ module BackgroundIsolation =
             enqueue 0 y
             enqueue (w - 1) y
 
-    let private floodFill
-        (w: int)
-        (h: int)
-        (isBackground: int -> int -> bool)
-        (visited: bool[])
-        (queue: System.Collections.Generic.Queue<struct (int * int)>)
-        =
+    let private floodFill (w: int)
+            (h: int)
+            (isBackground: int -> int -> bool)
+            (visited: bool[])
+            (queue: System.Collections.Generic.Queue<struct (int * int)>)
+            =
         let tryVisit x y =
             if x >= 0 && x < w && y >= 0 && y < h then
                 enqueueIfBackground x y w isBackground visited queue
@@ -257,26 +253,31 @@ module SimilarityComparison =
     // integer offset search can never align it sub-pixel and a one-pixel board
     // misalignment destroys the correlation. A light blur widens those features
     // so matching tolerates the imperfect framing of a hand-selected board.
-    let private blurOnce (src: float[]) : float[] =
-        let horizontal = Array.zeroCreate<float> (sampleSize * sampleSize)
+    let private blurHorizontal (src: float[]) : float[] =
+        let result = Array.zeroCreate<float> (sampleSize * sampleSize)
 
         for y in 0 .. sampleSize - 1 do
             for x in 0 .. sampleSize - 1 do
                 let c = src[y * sampleSize + x]
                 let l = if x > 0 then src[y * sampleSize + x - 1] else c
                 let r = if x < sampleSize - 1 then src[y * sampleSize + x + 1] else c
-                horizontal[y * sampleSize + x] <- (l + 2.0 * c + r) / 4.0
+                result[y * sampleSize + x] <- (l + 2.0 * c + r) / 4.0
 
+        result
+
+    let private blurVertical (src: float[]) : float[] =
         let result = Array.zeroCreate<float> (sampleSize * sampleSize)
 
         for y in 0 .. sampleSize - 1 do
             for x in 0 .. sampleSize - 1 do
-                let c = horizontal[y * sampleSize + x]
-                let u = if y > 0 then horizontal[(y - 1) * sampleSize + x] else c
-                let d = if y < sampleSize - 1 then horizontal[(y + 1) * sampleSize + x] else c
+                let c = src[y * sampleSize + x]
+                let u = if y > 0 then src[(y - 1) * sampleSize + x] else c
+                let d = if y < sampleSize - 1 then src[(y + 1) * sampleSize + x] else c
                 result[y * sampleSize + x] <- (u + 2.0 * c + d) / 4.0
 
         result
+
+    let private blurOnce (src: float[]) : float[] = src |> blurHorizontal |> blurVertical
 
     let private blur (src: float[]) : float[] = blurOnce src
 
@@ -531,10 +532,7 @@ module SimilarityComparison =
     // horizontal midline, so it scores ~1. Every real piece is bottom-heavy
     // (wider base than top) and never approaches that, so a near-perfect mirror
     // marks an empty highlighted square rather than a piece.
-    let verticalSymmetry (sample: float[]) =
-        let centerStart = sampleSize / 4
-        let centerEnd = sampleSize - centerStart
-
+    let private verticalSymmetrySums (sample: float[]) centerStart centerEnd =
         let mutable topSum = 0.0
         let mutable bottomSum = 0.0
         let mutable count = 0
@@ -545,24 +543,34 @@ module SimilarityComparison =
                 bottomSum <- bottomSum + sample[(sampleSize - 1 - y) * sampleSize + x]
                 count <- count + 1
 
+        topSum, bottomSum, count
+
+    let private verticalSymmetryNcc (sample: float[]) centerStart centerEnd topMean bottomMean =
+        let mutable num = 0.0
+        let mutable topSq = 0.0
+        let mutable bottomSq = 0.0
+
+        for y in centerStart .. centerEnd - 1 do
+            for x in centerStart .. centerEnd - 1 do
+                let t = sample[y * sampleSize + x] - topMean
+                let b = sample[(sampleSize - 1 - y) * sampleSize + x] - bottomMean
+                num <- num + t * b
+                topSq <- topSq + t * t
+                bottomSq <- bottomSq + b * b
+
+        if topSq < 1.0 || bottomSq < 1.0 then 1.0 else num / sqrt (topSq * bottomSq)
+
+    let verticalSymmetry (sample: float[]) =
+        let centerStart = sampleSize / 4
+        let centerEnd = sampleSize - centerStart
+        let topSum, bottomSum, count = verticalSymmetrySums sample centerStart centerEnd
+
         if count = 0 then
             1.0
         else
             let topMean = topSum / float count
             let bottomMean = bottomSum / float count
-            let mutable num = 0.0
-            let mutable topSq = 0.0
-            let mutable bottomSq = 0.0
-
-            for y in centerStart .. centerEnd - 1 do
-                for x in centerStart .. centerEnd - 1 do
-                    let t = sample[y * sampleSize + x] - topMean
-                    let b = sample[(sampleSize - 1 - y) * sampleSize + x] - bottomMean
-                    num <- num + t * b
-                    topSq <- topSq + t * t
-                    bottomSq <- bottomSq + b * b
-
-            if topSq < 1.0 || bottomSq < 1.0 then 1.0 else num / sqrt (topSq * bottomSq)
+            verticalSymmetryNcc sample centerStart centerEnd topMean bottomMean
 
     // A move-hint / premove dot is a round disk, so among the pieces it can only
     // resemble a pawn (the one compact, rounded silhouette) and the matcher duly
@@ -583,12 +591,7 @@ module SimilarityComparison =
 
     let private minComparedPixels = 16
 
-    let private nccAtOffset (template: float[]) (mask: bool[]) (sample: float[]) (dx: int) (dy: int) =
-        let xStart = max 0 (-dx)
-        let xEnd = min sampleSize (sampleSize - dx)
-        let yStart = max 0 (-dy)
-        let yEnd = min sampleSize (sampleSize - dy)
-
+    let private nccSumPass (template: float[]) (mask: bool[]) (sample: float[]) xStart xEnd yStart yEnd dx dy =
         let mutable count = 0
         let mutable tsum = 0.0
         let mutable ssum = 0.0
@@ -596,29 +599,45 @@ module SimilarityComparison =
         for y in yStart .. yEnd - 1 do
             for x in xStart .. xEnd - 1 do
                 let ti = y * sampleSize + x
+
                 if mask[ti] then
                     tsum <- tsum + template[ti]
                     ssum <- ssum + sample[(y + dy) * sampleSize + (x + dx)]
                     count <- count + 1
+
+        count, tsum, ssum
+
+    let private nccCorrelationPass (template: float[]) (mask: bool[]) (sample: float[]) xStart xEnd yStart yEnd dx dy tmean smean =
+        let mutable num = 0.0
+        let mutable tsq = 0.0
+        let mutable ssq = 0.0
+
+        for y in yStart .. yEnd - 1 do
+            for x in xStart .. xEnd - 1 do
+                let ti = y * sampleSize + x
+
+                if mask[ti] then
+                    let tv = template[ti] - tmean
+                    let sv = sample[(y + dy) * sampleSize + (x + dx)] - smean
+                    num <- num + tv * sv
+                    tsq <- tsq + tv * tv
+                    ssq <- ssq + sv * sv
+
+        num, tsq, ssq
+
+    let private nccAtOffset (template: float[]) (mask: bool[]) (sample: float[]) (dx: int) (dy: int) =
+        let xStart = max 0 (-dx)
+        let xEnd = min sampleSize (sampleSize - dx)
+        let yStart = max 0 (-dy)
+        let yEnd = min sampleSize (sampleSize - dy)
+        let count, tsum, ssum = nccSumPass template mask sample xStart xEnd yStart yEnd dx dy
 
         if count < minComparedPixels then
             0.0
         else
             let tmean = tsum / float count
             let smean = ssum / float count
-            let mutable num = 0.0
-            let mutable tsq = 0.0
-            let mutable ssq = 0.0
-
-            for y in yStart .. yEnd - 1 do
-                for x in xStart .. xEnd - 1 do
-                    let ti = y * sampleSize + x
-                    if mask[ti] then
-                        let tv = template[ti] - tmean
-                        let sv = sample[(y + dy) * sampleSize + (x + dx)] - smean
-                        num <- num + tv * sv
-                        tsq <- tsq + tv * tv
-                        ssq <- ssq + sv * sv
+            let num, tsq, ssq = nccCorrelationPass template mask sample xStart xEnd yStart yEnd dx dy tmean smean
 
             if tsq < 1.0 || ssq < 1.0 then
                 0.0

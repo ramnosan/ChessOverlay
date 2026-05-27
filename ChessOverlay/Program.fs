@@ -12,13 +12,16 @@ module BoardGeometryStorage =
 
     let private storagePath = Path.Combine(storageDir, "board_area.txt")
 
+    let internal tryParseThreeInts (a: string) (b: string) (c: string) =
+        match Int32.TryParse a, Int32.TryParse b, Int32.TryParse c with
+        | (true, x), (true, y), (true, z) when z > 0 -> Some(x, y, z)
+        | _ -> None
+
     let tryParseGeometry (text: string) =
         match text.Split(',') with
         | [| leftStr; topStr; sizeStr |] ->
-            match Int32.TryParse leftStr, Int32.TryParse topStr, Int32.TryParse sizeStr with
-            | (true, left), (true, top), (true, size) when size > 0 ->
-                Some { Left = left; Top = top; Size = size }
-            | _ -> None
+            tryParseThreeInts leftStr topStr sizeStr
+            |> Option.map (fun (left, top, size) -> { Left = left; Top = top; Size = size })
         | _ -> None
 
     let tryLoadFrom path =
@@ -62,16 +65,17 @@ module Program =
             else
                 None)
 
+    let private splitOptions =
+        StringSplitOptions.TrimEntries ||| StringSplitOptions.RemoveEmptyEntries
+
     let tryParseBoardGeometry (value: string) =
-        let parts = value.Split(',', StringSplitOptions.TrimEntries ||| StringSplitOptions.RemoveEmptyEntries)
+        let parts = value.Split(',', splitOptions)
 
         if parts.Length <> 3 then
             None
         else
-            match Int32.TryParse parts[0], Int32.TryParse parts[1], Int32.TryParse parts[2] with
-            | (true, left), (true, top), (true, size) when size > 0 ->
-                Some { Left = left; Top = top; Size = size }
-            | _ -> None
+            BoardGeometryStorage.tryParseThreeInts parts[0] parts[1] parts[2]
+            |> Option.map (fun (left, top, size) -> { Left = left; Top = top; Size = size })
 
     let parseStartupOptions args =
         {
@@ -156,14 +160,17 @@ module Program =
             |> Option.exists (String.IsNullOrWhiteSpace >> not))
         |> Option.flatten
 
+    let private createReaderFromFen options environmentFen =
+        match configuredFen options environmentFen with
+        | Some value -> createFenReader value
+        | None when options.IsDemo -> createFenReader startingFen
+        | None -> createTemplateReader "templates"
+
     let createReader options environmentFen =
         if shouldUseTemplates options then
             createTemplateReader (templatePath options)
         else
-            match configuredFen options environmentFen with
-            | Some value -> createFenReader value
-            | None when options.IsDemo -> createFenReader startingFen
-            | None -> createTemplateReader "templates"
+            createReaderFromFen options environmentFen
 
     [<ExcludeFromCodeCoverage>]
     let private templateCount path =

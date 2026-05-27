@@ -51,3 +51,7 @@ module DomainTests =
         Assert.True(Fen.parseBoard "" |> Result.isError)
         Assert.True(Fen.parseBoard "8/8/8/8/8/8/8 w - - 0 1" |> Result.isError)
         Assert.True(Fen.parseBoard "8/8/8/8/8/8/8/X7 w - - 0 1" |> Result.isError)
+
+    [<Fact>]
+    let ``FEN parser rejects rank with too many piece positions`` () =
+        Assert.True(Fen.parseBoard "ppppppppK/8/8/8/8/8/8/8 w - - 0 1" |> Result.isError)
