@@ -5,6 +5,7 @@
 .worktrees/
 swarmtools/
 logs/
+tmp/
 agent_context/
 .vs/
 bin/
