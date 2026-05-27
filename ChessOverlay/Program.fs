@@ -224,6 +224,8 @@ module Program =
             initialGeometry |> Option.bind (calibrateTemplates options environmentFen)
 
         let reader, warning = createReader options environmentFen
+        let reader =
+            LastBoardStateReader(reader, LastBoardStateStorage.tryLoad, LastBoardStateStorage.save) :> IBoardReader
 
         let mergedWarning =
             match calibrationWarning, warning with

@@ -2,6 +2,7 @@ namespace ChessOverlay
 
 open System
 open System.Drawing
+open System.Text
 
 type PieceColor =
     | White
@@ -175,3 +176,42 @@ module Fen =
                         state
                         |> Result.bind (parseRank rankIndex rank))
                     (Ok Map.empty)
+
+    let private pieceToChar piece =
+        let value =
+            match piece.Kind with
+            | Pawn -> 'p'
+            | Knight -> 'n'
+            | Bishop -> 'b'
+            | Rook -> 'r'
+            | Queen -> 'q'
+            | King -> 'k'
+
+        if piece.Color = White then
+            Char.ToUpperInvariant value
+        else
+            value
+
+    let boardPlacement (board: BoardState) =
+        let builder = StringBuilder()
+
+        for rank in 0 .. 7 do
+            if rank > 0 then
+                builder.Append('/') |> ignore
+
+            let mutable emptyCount = 0
+
+            for file in 0 .. 7 do
+                match Map.tryFind { File = file; Rank = rank } board with
+                | Some piece ->
+                    if emptyCount > 0 then
+                        builder.Append(emptyCount) |> ignore
+                        emptyCount <- 0
+
+                    builder.Append(pieceToChar piece) |> ignore
+                | None -> emptyCount <- emptyCount + 1
+
+            if emptyCount > 0 then
+                builder.Append(emptyCount) |> ignore
+
+        builder.ToString()

@@ -17,7 +17,7 @@ type OverlayController(
 
     let scanInterval = defaultArg scanIntervalMilliseconds 500
     let timingEnabled = defaultArg timingEnabled false
-    let confidenceThreshold = 0.45
+    let confidenceThreshold = BoardReadingConfidence.minimumUsable
     let timer = new Timer(Interval = scanInterval)
     let scanGate = obj ()
     let mutable scanInProgress = false

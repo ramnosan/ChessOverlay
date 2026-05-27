@@ -5,6 +5,11 @@ open Xunit
 open ChessOverlay
 
 module ProgramTests =
+    let private boardFromFen fen =
+        match Fen.parseBoard fen with
+        | Ok board -> board
+        | Error message -> failwith message
+
     [<Fact>]
     let ``tryParseGeometry accepts valid left,top,size string`` () =
         Assert.Equal(Some { Left = 10; Top = 20; Size = 300 }, BoardGeometryStorage.tryParseGeometry "10,20,300")
@@ -149,3 +154,26 @@ module ProgramTests =
         let geometry = { Left = 42; Top = 99; Size = 512 }
         BoardGeometryStorage.save geometry
         Assert.Equal(Some geometry, BoardGeometryStorage.tryLoad())
+
+    [<Fact>]
+    let ``last board state save writes board that tryLoad reads back`` () =
+        let path = Path.GetTempFileName()
+        let board = boardFromFen "8/8/8/8/3q4/8/4K3/8 w - - 0 1"
+
+        try
+            LastBoardStateStorage.saveTo path board
+
+            Assert.Equal(Some board, LastBoardStateStorage.tryLoadFrom path)
+        finally
+            File.Delete(path)
+
+    [<Fact>]
+    let ``last board state tryLoad rejects malformed content`` () =
+        let path = Path.GetTempFileName()
+
+        try
+            File.WriteAllText(path, "not-a-board")
+
+            Assert.Equal(None, LastBoardStateStorage.tryLoadFrom path)
+        finally
+            File.Delete(path)
