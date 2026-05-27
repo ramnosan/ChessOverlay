@@ -262,3 +262,40 @@ module AttackCalculatorPropertyTests =
         checkProp (fun board ->
             let arrows = AttackCalculator.enemyAttackArrows board
             arrows.Length = (arrows |> Set.ofList).Count)
+
+    [<Fact>]
+    let ``property: attacksForPiece equals union of rays from attackRaysForPiece`` () =
+        checkProp (fun board ->
+            board
+            |> Map.forall (fun sq piece ->
+                let raysUnion =
+                    AttackCalculator.attackRaysForPiece board sq piece
+                    |> List.concat
+                    |> Set.ofList
+                let direct = AttackCalculator.attacksForPiece board sq piece
+                raysUnion = direct))
+
+    [<Fact>]
+    let ``property: all attacked squares are valid board squares`` () =
+        checkProp (fun board ->
+            board
+            |> Map.forall (fun sq piece ->
+                AttackCalculator.attacksForPiece board sq piece
+                |> Set.forall Squares.isValid))
+
+    [<Fact>]
+    let ``property: hanging squares are attacked by the enemy`` () =
+        checkProp (fun board ->
+            match AttackCalculator.enemyColor board with
+            | None -> AttackCalculator.hangingSquares board |> Set.isEmpty
+            | Some enemy ->
+                let enemyAttacked = AttackCalculator.attackedSquaresByColor board enemy
+                AttackCalculator.hangingSquares board
+                |> Set.forall (fun sq -> Set.contains sq enemyAttacked))
+
+    [<Fact>]
+    let ``property: enemy color is absent only when board is empty of one color`` () =
+        checkProp (fun board ->
+            match AttackCalculator.enemyColor board with
+            | None -> Map.isEmpty board
+            | Some _ -> not (Map.isEmpty board))

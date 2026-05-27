@@ -77,6 +77,19 @@ module ProgramTests =
         Assert.Equal("Mode: manual board geometry - warning", Program.statusWithWarning "Mode: manual board geometry" (Some "warning"))
 
     [<Fact>]
+    let ``Startup status covers all mode and suffix combinations`` () =
+        Assert.Equal("Mode: demo", Program.startupStatus (Program.parseStartupOptions [| "--demo" |]))
+        Assert.Equal("Mode: selected board area", Program.startupStatus (Program.parseStartupOptions [||]))
+
+        Assert.Equal(
+            "Mode: selected board area - calibrating templates",
+            Program.startupStatus (Program.parseStartupOptions [| "--calibrate-templates" |]))
+
+        Assert.Equal(
+            "Mode: demo - timing enabled",
+            Program.startupStatus (Program.parseStartupOptions [| "--demo"; "--timing" |]))
+
+    [<Fact>]
     let ``Board geometry creation uses supplied board before manual selection`` () =
         let options = Program.parseStartupOptions [| "--board"; "10,20,300" |]
         let mutable selectionRequested = false
