@@ -14,6 +14,14 @@ module BoardReaderTests =
         interface IBoardReader with
             member _.Read(_, _) = reading
 
+    type private FixedDomBoardReader(reading: BoardReading option, isAvailable: bool) =
+        interface IBoardReader with
+            member _.Read(_, _) = None
+
+        interface IDomBoardReader with
+            member _.IsDomAvailable = isAvailable
+            member _.ReadDom() = reading
+
     [<Fact>]
     let ``Board readers expose FEN and uncertain behavior`` () =
         use bitmap = new Bitmap(20, 20)
@@ -135,3 +143,102 @@ module BoardReaderTests =
             Assert.Equal(None, saved)
             Assert.Equal("Last board state", reading.Strategy)
         | None -> failwith "Expected the saved board reading."
+
+    [<Fact>]
+    let ``LastBoardStateReader exposes available DOM readings without saved fallback`` () =
+        let highConfidenceBoard = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+        let lowConfidenceBoard = boardFromFen "8/8/8/8/8/8/4k3/8 w - - 0 1"
+        let mutable saved = None
+
+        let highConfidenceReading =
+            {
+                Board = highConfidenceBoard
+                Confidence = 1.0
+                Candidates = Map.empty
+                Strategy = "Chrome DOM"
+            }
+
+        let lowConfidenceReading =
+            {
+                Board = lowConfidenceBoard
+                Confidence = 0.0
+                Candidates = Map.empty
+                Strategy = "Chrome DOM"
+            }
+
+        let highReader =
+            LastBoardStateReader(
+                FixedDomBoardReader(Some highConfidenceReading, true),
+                (fun () -> failwith "DOM reads should not load saved board state."),
+                (fun board -> saved <- Some board))
+            :> IDomBoardReader
+
+        let lowReader =
+            LastBoardStateReader(
+                FixedDomBoardReader(Some lowConfidenceReading, true),
+                (fun () -> failwith "DOM reads should not load saved board state."),
+                ignore)
+            :> IDomBoardReader
+
+        let unavailableReader =
+            LastBoardStateReader(FixedDomBoardReader(Some highConfidenceReading, false), (fun () -> None), ignore)
+            :> IDomBoardReader
+
+        let emptyReader =
+            LastBoardStateReader(FixedDomBoardReader(None, true), (fun () -> None), ignore)
+            :> IDomBoardReader
+
+        Assert.True(highReader.IsDomAvailable)
+        Assert.Equal(Some highConfidenceReading, highReader.ReadDom())
+        Assert.Equal(Some highConfidenceBoard, saved)
+        Assert.Equal(Some lowConfidenceReading, lowReader.ReadDom())
+        Assert.False(unavailableReader.IsDomAvailable)
+        Assert.Equal(None, unavailableReader.ReadDom())
+        Assert.Equal(None, emptyReader.ReadDom())
+
+    [<Fact>]
+    let ``Chrome DOM render delta skips unchanged board and geometry`` () =
+        let geometry = { Left = 10; Top = 20; Size = 400 }
+        let reading =
+            {
+                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Confidence = 1.0
+                Candidates = Map.empty
+                Strategy = "Chrome DOM"
+            }
+
+        let lastKey = ChromeDomRenderDelta.tryKey geometry reading
+
+        Assert.False(ChromeDomRenderDelta.shouldRecalculate lastKey geometry reading)
+
+    [<Fact>]
+    let ``Chrome DOM render delta recalculates when board or geometry changes`` () =
+        let geometry = { Left = 10; Top = 20; Size = 400 }
+        let movedGeometry = { geometry with Left = 11 }
+        let reading =
+            {
+                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Confidence = 1.0
+                Candidates = Map.empty
+                Strategy = "Chrome DOM"
+            }
+        let changedReading =
+            { reading with Board = boardFromFen "8/8/8/8/8/8/5K2/8 w - - 0 1" }
+
+        let lastKey = ChromeDomRenderDelta.tryKey geometry reading
+
+        Assert.True(ChromeDomRenderDelta.shouldRecalculate lastKey geometry changedReading)
+        Assert.True(ChromeDomRenderDelta.shouldRecalculate lastKey movedGeometry reading)
+
+    [<Fact>]
+    let ``Chrome DOM render delta always recalculates non DOM readings`` () =
+        let geometry = { Left = 10; Top = 20; Size = 400 }
+        let reading =
+            {
+                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Confidence = 1.0
+                Candidates = Map.empty
+                Strategy = "Template"
+            }
+
+        Assert.True(ChromeDomRenderDelta.shouldRecalculate None geometry reading)

@@ -177,3 +177,9 @@ module ProgramTests =
             Assert.Equal(None, LastBoardStateStorage.tryLoadFrom path)
         finally
             File.Delete(path)
+
+    [<Fact>]
+    let ``last board state tryLoad returns None for missing file`` () =
+        let path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName())
+
+        Assert.Equal(None, LastBoardStateStorage.tryLoadFrom path)

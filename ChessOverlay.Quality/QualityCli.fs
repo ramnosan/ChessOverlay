@@ -34,7 +34,7 @@ DRY options:
 
 CRAP options:
   --changed          Analyze changed app .fs files only.
-  --coverage <file>  Use a Cobertura coverage XML file.
+  --coverage <file>  Use a Cobertura coverage XML file instead of generating fresh coverage.
 
 ARCH usage:
   dotnet run --project ChessOverlay.Quality -- arch
@@ -234,26 +234,42 @@ ARCH options:
             printfn ""
             printfn "Threshold %.1f exceeded by %i function(s)." threshold exceeded.Length
 
+    let private resolveCoverage root args =
+        match tryPopValue "--coverage" args with
+        | Some coveragePath ->
+            printfn "Using coverage: %s" coveragePath
+            Some coveragePath
+        | None ->
+            printfn "Generating fresh coverage..."
+            let result = CrapMetric.generateCoverage root
+            printfn "Using coverage: %s" result.CoveragePath
+            Some result.CoveragePath
+
     let private runCrap args =
-        let threshold = parseFloat "--threshold" 8.0 args
+        try
+            let threshold = parseFloat "--threshold" 8.0 args
+            let root = findRepositoryRoot ()
 
-        let options =
-            {
-                Root = findRepositoryRoot ()
-                Inputs = crapInputs args
-                ChangedOnly = args |> List.contains "--changed"
-                CoveragePath = tryPopValue "--coverage" args
-                Threshold = threshold
-            }
+            let options =
+                {
+                    Root = root
+                    Inputs = crapInputs args
+                    ChangedOnly = args |> List.contains "--changed"
+                    CoveragePath = resolveCoverage root args
+                    Threshold = threshold
+                }
 
-        let scores = CrapMetric.analyze options
-        printCrapReport threshold scores
+            let scores = CrapMetric.analyze options
+            printCrapReport threshold scores
 
-        if scores
-           |> List.exists (fun score -> score.Crap |> Option.exists (fun value -> value > threshold)) then
+            if scores
+               |> List.exists (fun score -> score.Crap |> Option.exists (fun value -> value > threshold)) then
+                2
+            else
+                0
+        with ex ->
+            eprintfn "%s" ex.Message
             2
-        else
-            0
 
     let private runAll () =
         printfn "DRY"

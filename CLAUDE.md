@@ -76,8 +76,12 @@ dotnet test ChessOverlay.Tests --filter "ClassName"
 
 **Run tests with coverage:**
 \\\
-dotnet test ChessOverlay.Tests --collect:"XPlat Code Coverage"
+dotnet run --project ChessOverlay.Quality -- crap
 \\\
+
+The CRAP quality command generates fresh Cobertura coverage before scoring, using isolated
+`.build-check/quality-coverage/` build output and `artifacts/coverage/` results so stale
+`ChessOverlay.Tests/TestResults` files are not reused accidentally.
 
 Test files and their focus areas:
 - **DomainTests.fs** - FEN parsing, square naming, board geometry, board state helpers
@@ -108,6 +112,9 @@ dotnet run --project ChessOverlay.Quality -- dry --threshold 0.82 --min-lines 4
 \\\
 dotnet run --project ChessOverlay.Quality -- crap
 \\\
+
+By default this regenerates test coverage before calculating scores. Use `--coverage <file>`
+only when intentionally analyzing a specific Cobertura XML file.
 
 **Architecture view** (detects circular dependencies and visualizes module layers):
 \\\

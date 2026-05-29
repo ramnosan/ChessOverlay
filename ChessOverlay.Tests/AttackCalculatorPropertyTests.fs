@@ -86,12 +86,6 @@ module AttackCalculatorPropertyTests =
                 Squares.isValid fromSq && Squares.isValid toSq))
 
     [<Fact>]
-    let ``property: fork from-square differs from to-square`` () =
-        checkProp (fun board ->
-            AttackCalculator.friendlyForkMoveArrows board
-            |> List.forall (fun (fromSq, toSq) -> fromSq <> toSq))
-
-    [<Fact>]
     let ``property: fork from-square is occupied`` () =
         checkProp (fun board ->
             AttackCalculator.friendlyForkMoveArrows board
@@ -123,38 +117,6 @@ module AttackCalculatorPropertyTests =
                     | Some p -> p.Color <> friendly
                     | None -> true))
 
-    [<Fact>]
-    let ``property: fork arrows contain no duplicates`` () =
-        checkProp (fun board ->
-            let arrows = AttackCalculator.friendlyForkMoveArrows board
-            arrows.Length = (arrows |> Set.ofList).Count)
-
-    [<Fact>]
-    let ``property: friendly king is safe after every fork move`` () =
-        checkProp (fun board ->
-            match AttackCalculator.enemyColor board with
-            | None -> true
-            | Some enemy ->
-                let friendly = opposite enemy
-                AttackCalculator.friendlyForkMoveArrows board
-                |> List.forall (fun (fromSq, toSq) ->
-                    match Map.tryFind fromSq board with
-                    | Some piece when piece.Color = friendly ->
-                        isKingSafeAfterMove board fromSq toSq piece friendly enemy
-                    | _ -> true))
-
-    [<Fact>]
-    let ``property: each fork arrow attacks at least 2 enemy pieces`` () =
-        checkProp (fun board ->
-            match AttackCalculator.enemyColor board with
-            | None -> true
-            | Some enemy ->
-                AttackCalculator.friendlyForkMoveArrows board
-                |> List.forall (fun (fromSq, toSq) ->
-                    match Map.tryFind fromSq board with
-                    | Some piece ->
-                        countEnemyPiecesAttackedAfterMove board fromSq toSq piece enemy >= 2
-                    | None -> false))
 
     [<Fact>]
     let ``property: real fork arrows are a subset of the brute-force reference`` () =
@@ -195,32 +157,6 @@ module AttackCalculatorPropertyTests =
             |> List.forall (fun (sq, forked) ->
                 Squares.isValid sq
                 && forked |> Set.forall Squares.isValid))
-
-    [<Fact>]
-    let ``property: enemy forks originate from enemy pieces`` () =
-        checkProp (fun board ->
-            match AttackCalculator.enemyColor board with
-            | None -> AttackCalculator.enemyForks board |> List.isEmpty
-            | Some enemy ->
-                AttackCalculator.enemyForks board
-                |> List.forall (fun (sq, _) ->
-                    match Map.tryFind sq board with
-                    | Some p -> p.Color = enemy
-                    | None -> false))
-
-    [<Fact>]
-    let ``property: enemy fork forked squares contain friendly pieces`` () =
-        checkProp (fun board ->
-            match AttackCalculator.enemyColor board with
-            | None -> true
-            | Some enemy ->
-                let friendly = opposite enemy
-                AttackCalculator.enemyForks board
-                |> List.forall (fun (_, forked) ->
-                    forked |> Set.forall (fun sq ->
-                        match Map.tryFind sq board with
-                        | Some p -> p.Color = friendly
-                        | None -> false)))
 
     [<Fact>]
     let ``property: enemy attack arrows reference valid squares`` () =

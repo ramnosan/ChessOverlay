@@ -32,6 +32,13 @@ type QualityOptions =
         Threshold: float
     }
 
+type CoverageGenerationResult =
+    {
+        CoveragePath: string
+        Output: string
+        Error: string
+    }
+
 module CrapMetric =
     let private functionPattern =
         Regex(@"^\s*(?:let\s+(?:(?:rec|inline|private|internal|public|mutable)\s+)*(?!(?:rec|inline|private|internal|public|mutable)\b)((?:``[^`]+``)|[A-Za-z_][A-Za-z0-9_']*)(?![A-Za-z0-9_'])\s+(?!=)|member\s+(?:(?:private|internal|public)\s+)*[^\s.]+\.((?:``[^`]+``)|[A-Za-z_][A-Za-z0-9_']*)(?![A-Za-z0-9_'])(?:\s*\(|\s+(?!=)))", RegexOptions.Compiled)
@@ -354,17 +361,58 @@ module CrapMetric =
         |> List.filter (fun path -> path.StartsWith("ChessOverlay/", StringComparison.OrdinalIgnoreCase))
         |> List.map (fun path -> Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)))
 
-    let latestCoverageFile (root: string) =
-        let testResults = Path.Combine(root, "ChessOverlay.Tests", "TestResults")
+    let private uniqueRunName () =
+        $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}"
 
-        if Directory.Exists testResults then
-            Directory.EnumerateFiles(testResults, "coverage.cobertura.xml", SearchOption.AllDirectories)
+    let private msbuildPathWithTrailingSlash ([<ParamArray>] parts: string array) =
+        String.Join("/", parts) + "/"
+
+    let generateCoverage (root: string) =
+        let root = normalizePath root
+        let runName = uniqueRunName ()
+        let testProject = Path.Combine(root, "ChessOverlay.Tests")
+        let resultsDirectory = Path.Combine(root, "artifacts", "coverage", runName)
+        let outputPath = msbuildPathWithTrailingSlash [| ".build-check"; "quality-coverage"; runName; "bin" |]
+        let intermediatePath = msbuildPathWithTrailingSlash [| ".build-check"; "quality-coverage"; runName; "obj" |]
+
+        Directory.CreateDirectory(resultsDirectory) |> ignore
+
+        let startInfo = ProcessStartInfo("dotnet")
+        startInfo.WorkingDirectory <- root
+        startInfo.RedirectStandardOutput <- true
+        startInfo.RedirectStandardError <- true
+        startInfo.UseShellExecute <- false
+        startInfo.ArgumentList.Add("test")
+        startInfo.ArgumentList.Add(testProject)
+        startInfo.ArgumentList.Add("--collect")
+        startInfo.ArgumentList.Add("XPlat Code Coverage")
+        startInfo.ArgumentList.Add("--results-directory")
+        startInfo.ArgumentList.Add(resultsDirectory)
+        startInfo.ArgumentList.Add($"-p:BaseOutputPath={outputPath}")
+        startInfo.ArgumentList.Add($"-p:BaseIntermediateOutputPath={intermediatePath}")
+
+        use testProcess = Process.Start(startInfo)
+        let output = testProcess.StandardOutput.ReadToEnd()
+        let error = testProcess.StandardError.ReadToEnd()
+        testProcess.WaitForExit()
+
+        if testProcess.ExitCode <> 0 then
+            invalidOp $"Coverage test run failed.{Environment.NewLine}{output}{Environment.NewLine}{error}"
+
+        let coveragePath =
+            Directory.EnumerateFiles(resultsDirectory, "coverage.cobertura.xml", SearchOption.AllDirectories)
             |> Seq.map FileInfo
             |> Seq.sortByDescending _.LastWriteTimeUtc
             |> Seq.tryHead
             |> Option.map _.FullName
-        else
-            None
+            |> Option.defaultWith (fun () ->
+                invalidOp $"Coverage test run completed but no coverage.cobertura.xml was written under {resultsDirectory}.")
+
+        {
+            CoveragePath = coveragePath
+            Output = output
+            Error = error
+        }
 
     let analyze (options: QualityOptions) =
         let sourceFiles =
@@ -375,7 +423,6 @@ module CrapMetric =
 
         let coverage =
             options.CoveragePath
-            |> Option.orElseWith (fun () -> latestCoverageFile options.Root)
             |> Option.map (readCoberturaLineCoverage options.Root)
             |> Option.defaultValue Map.empty
 

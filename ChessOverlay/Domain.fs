@@ -177,20 +177,33 @@ module Fen =
                         |> Result.bind (parseRank rankIndex rank))
                     (Ok Map.empty)
 
-    let private pieceToChar piece =
-        let value =
-            match piece.Kind with
-            | Pawn -> 'p'
-            | Knight -> 'n'
-            | Bishop -> 'b'
-            | Rook -> 'r'
-            | Queen -> 'q'
-            | King -> 'k'
+    let private kindChars =
+        pieceKinds
+        |> Seq.map (fun entry -> entry.Value, entry.Key)
+        |> Map.ofSeq
 
-        if piece.Color = White then
-            Char.ToUpperInvariant value
-        else
-            value
+    let private kindToChar kind = Map.find kind kindChars
+
+    let private pieceToChar piece =
+        let value = kindToChar piece.Kind
+        if piece.Color = White then Char.ToUpperInvariant value else value
+
+    let private appendEmptyRun (builder: StringBuilder) emptyCount =
+        if emptyCount > 0 then
+            builder.Append(emptyCount) |> ignore
+
+    let private appendRank (board: BoardState) rank (builder: StringBuilder) =
+        let mutable emptyCount = 0
+
+        for file in 0 .. 7 do
+            match Map.tryFind { File = file; Rank = rank } board with
+            | Some piece ->
+                appendEmptyRun builder emptyCount
+                emptyCount <- 0
+                builder.Append(pieceToChar piece) |> ignore
+            | None -> emptyCount <- emptyCount + 1
+
+        appendEmptyRun builder emptyCount
 
     let boardPlacement (board: BoardState) =
         let builder = StringBuilder()
@@ -199,19 +212,6 @@ module Fen =
             if rank > 0 then
                 builder.Append('/') |> ignore
 
-            let mutable emptyCount = 0
-
-            for file in 0 .. 7 do
-                match Map.tryFind { File = file; Rank = rank } board with
-                | Some piece ->
-                    if emptyCount > 0 then
-                        builder.Append(emptyCount) |> ignore
-                        emptyCount <- 0
-
-                    builder.Append(pieceToChar piece) |> ignore
-                | None -> emptyCount <- emptyCount + 1
-
-            if emptyCount > 0 then
-                builder.Append(emptyCount) |> ignore
+            appendRank board rank builder
 
         builder.ToString()

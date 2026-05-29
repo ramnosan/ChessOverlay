@@ -7,6 +7,30 @@ open System.Drawing
 open System.Threading.Tasks
 open System.Windows.Forms
 
+module internal ChromeDomRenderDelta =
+    type RenderKey =
+        {
+            Geometry: BoardGeometry
+            Board: BoardState
+            Strategy: string
+        }
+
+    let tryKey geometry (reading: BoardReading) =
+        if reading.Strategy.StartsWith("Chrome ", StringComparison.Ordinal) then
+            Some
+                {
+                    Geometry = geometry
+                    Board = reading.Board
+                    Strategy = reading.Strategy
+                }
+        else
+            None
+
+    let shouldRecalculate lastKey geometry reading =
+        match tryKey geometry reading with
+        | Some key -> Some key <> lastKey
+        | None -> true
+
 [<ExcludeFromCodeCoverage>]
 type OverlayController(
     initialGeometry: BoardGeometry option,
@@ -16,14 +40,22 @@ type OverlayController(
     ?scanIntervalMilliseconds: int) =
 
     let scanInterval = defaultArg scanIntervalMilliseconds 500
+    let domScanInterval = 75
+    let domReader =
+        match reader with
+        | :? IDomBoardReader as value when value.IsDomAvailable -> Some value
+        | _ -> None
+
     let timingEnabled = defaultArg timingEnabled false
     let confidenceThreshold = BoardReadingConfidence.minimumUsable
-    let timer = new Timer(Interval = scanInterval)
+    let timer = new Timer(Interval = if domReader.IsSome then domScanInterval else scanInterval)
     let scanGate = obj ()
     let mutable scanInProgress = false
     let mutable isRunning = false
     let mutable scanGeneration = 0
     let mutable boardGeometry = initialGeometry
+    let mutable lastChromeDomRenderKey: ChromeDomRenderDelta.RenderKey option = None
+    let mutable lastScreenScan = DateTime.MinValue
 
     let toVirtualScreenGeometry (origin: Point) (geometry: BoardGeometry) =
         {
@@ -31,6 +63,10 @@ type OverlayController(
             Top = geometry.Top + origin.Y
             Size = geometry.Size
         }
+
+    let currentVirtualScreenGeometry geometry =
+        let bounds = SystemInformation.VirtualScreen
+        toVirtualScreenGeometry bounds.Location geometry
 
     let measure name action =
         let stopwatch = Stopwatch.StartNew()
@@ -92,55 +128,83 @@ type OverlayController(
             |> String.concat "; "
             |> fun summary -> Debug.WriteLine("Piece candidates: " + summary)
 
+    let shouldRunScreenScan () =
+        if domReader.IsNone then
+            true
+        else
+            let now = DateTime.UtcNow
+            let elapsed = now - lastScreenScan
+
+            if elapsed.TotalMilliseconds >= float scanInterval then
+                lastScreenScan <- now
+                true
+            else
+                false
+
+    let renderReading generation screenGeometry reading =
+        reading |> Option.iter logCandidates
+
+        match reading with
+        | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
+            if ChromeDomRenderDelta.shouldRecalculate lastChromeDomRenderKey screenGeometry boardReading then
+                lastChromeDomRenderKey <- ChromeDomRenderDelta.tryKey screenGeometry boardReading
+
+                let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
+                let friendlyForkMoveArrows = AttackCalculator.friendlyForkMoveArrows boardReading.Board
+                let enemyForkMoveArrows = AttackCalculator.enemyForkMoveArrows boardReading.Board
+                let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
+                let enemyHangingSquares = AttackCalculator.enemyHangingSquares boardReading.Board
+
+                let forkSquares =
+                    AttackCalculator.enemyForks boardReading.Board
+                    |> List.map fst
+                    |> Set.ofList
+
+                measure
+                    "overlay-update"
+                    (fun () ->
+                        updateOverlay
+                            generation
+                            (fun () ->
+                                overlay.ShowFrame
+                                    {
+                                        Geometry = screenGeometry
+                                        AttackArrows = attackArrows
+                                        FriendlyForkMoveArrows = friendlyForkMoveArrows
+                                        EnemyForkMoveArrows = enemyForkMoveArrows
+                                        HangingSquares = hangingSquares
+                                        EnemyHangingSquares = enemyHangingSquares
+                                        ForkSquares = forkSquares
+                                        DetectedPieces = Some boardReading.Board
+                                        Strategy = Some boardReading.Strategy
+                                    }))
+        | _ ->
+            lastChromeDomRenderKey <- None
+            let status = uncertainStatus reading
+            measure
+                "overlay-update"
+                (fun () -> updateOverlay generation (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
+
     let scanOnce generation =
         try
             match boardGeometry with
             | None -> ()
             | Some geometry ->
-                let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
-                use capture = capturedBitmap
+                let screenGeometry = currentVirtualScreenGeometry geometry
+                let domReading =
+                    domReader
+                    |> Option.bind (fun value -> measure "dom-reading" value.ReadDom)
 
-                let screenGeometry = toVirtualScreenGeometry origin geometry
+                match domReading with
+                | Some reading -> renderReading generation screenGeometry (Some reading)
+                | None when shouldRunScreenScan () ->
+                    let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
+                    use capture = capturedBitmap
 
-                let reading = measure "piece-reading" (fun () -> reader.Read(capture, geometry))
-                reading |> Option.iter logCandidates
-
-                match reading with
-                | Some boardReading when boardReading.Confidence >= confidenceThreshold ->
-                    let attackArrows = AttackCalculator.enemyAttackArrows boardReading.Board
-                    let friendlyForkMoveArrows = AttackCalculator.friendlyForkMoveArrows boardReading.Board
-                    let enemyForkMoveArrows = AttackCalculator.enemyForkMoveArrows boardReading.Board
-                    let hangingSquares = AttackCalculator.hangingSquares boardReading.Board
-                    let enemyHangingSquares = AttackCalculator.enemyHangingSquares boardReading.Board
-
-                    let forkSquares =
-                        AttackCalculator.enemyForks boardReading.Board
-                        |> List.map fst
-                        |> Set.ofList
-
-                    measure
-                        "overlay-update"
-                        (fun () ->
-                            updateOverlay
-                                generation
-                                (fun () ->
-                                    overlay.ShowFrame
-                                        {
-                                            Geometry = screenGeometry
-                                            AttackArrows = attackArrows
-                                            FriendlyForkMoveArrows = friendlyForkMoveArrows
-                                            EnemyForkMoveArrows = enemyForkMoveArrows
-                                            HangingSquares = hangingSquares
-                                            EnemyHangingSquares = enemyHangingSquares
-                                            ForkSquares = forkSquares
-                                            DetectedPieces = Some boardReading.Board
-                                            Strategy = Some boardReading.Strategy
-                                        }))
-                | _ ->
-                    let status = uncertainStatus reading
-                    measure
-                        "overlay-update"
-                        (fun () -> updateOverlay generation (fun () -> overlay.ShowUncertainBoard(screenGeometry, status)))
+                    let screenGeometry = toVirtualScreenGeometry origin geometry
+                    let reading = measure "piece-reading" (fun () -> reader.Read(capture, geometry))
+                    renderReading generation screenGeometry reading
+                | None -> ()
         finally
             lock scanGate (fun () -> scanInProgress <- false)
 
@@ -164,6 +228,9 @@ type OverlayController(
             isRunning <- true
             scanGeneration <- scanGeneration + 1)
 
+        lastChromeDomRenderKey <- None
+        lastScreenScan <- DateTime.MinValue
+
         if boardGeometry.IsSome then
             timer.Start()
             startScan ()
@@ -183,6 +250,9 @@ type OverlayController(
         lock scanGate (fun () ->
             isRunning <- false
             scanGeneration <- scanGeneration + 1)
+
+        lastChromeDomRenderKey <- None
+        lastScreenScan <- DateTime.MinValue
 
     interface IDisposable with
         member _.Dispose() =

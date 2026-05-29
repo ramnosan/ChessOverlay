@@ -90,6 +90,34 @@ module ChromeBoardDetectorTests =
         | None -> failwith "Expected Chrome DOM reading."
 
     [<Fact>]
+    let ``parseBoardReading accepts every chess com piece code`` () =
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[{"piece":"wp","square":"11"},{"piece":"wn","square":"21"},{"piece":"wb","square":"31"},{"piece":"wr","square":"41"},{"piece":"wq","square":"51"},{"piece":"wk","square":"61"},{"piece":"bp","square":"12"},{"piece":"bn","square":"22"},{"piece":"bb","square":"32"},{"piece":"br","square":"42"},{"piece":"bq","square":"52"},{"piece":"bk","square":"62"}]}}}}"""
+
+        match ChromeBoardDetector.parseBoardReading json with
+        | Some reading ->
+            Assert.Equal(Some { Color = White; Kind = Pawn }, BoardState.tryPieceAt { File = 0; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = White; Kind = Knight }, BoardState.tryPieceAt { File = 1; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = White; Kind = Bishop }, BoardState.tryPieceAt { File = 2; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = White; Kind = Rook }, BoardState.tryPieceAt { File = 3; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = White; Kind = Queen }, BoardState.tryPieceAt { File = 4; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = White; Kind = King }, BoardState.tryPieceAt { File = 5; Rank = 7 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Pawn }, BoardState.tryPieceAt { File = 0; Rank = 6 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Knight }, BoardState.tryPieceAt { File = 1; Rank = 6 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Bishop }, BoardState.tryPieceAt { File = 2; Rank = 6 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Rook }, BoardState.tryPieceAt { File = 3; Rank = 6 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = Queen }, BoardState.tryPieceAt { File = 4; Rank = 6 } reading.Board)
+            Assert.Equal(Some { Color = Black; Kind = King }, BoardState.tryPieceAt { File = 5; Rank = 6 } reading.Board)
+        | None -> failwith "Expected Chrome DOM reading."
+
+    [<Fact>]
+    let ``parseBoardReading ignores invalid piece and square codes`` () =
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[{"piece":"xx","square":"11"},{"piece":"wz","square":"21"},{"piece":"wp","square":"99"}]}}}}"""
+
+        Assert.Equal(None, ChromeBoardDetector.parseBoardReading json)
+
+    [<Fact>]
     let ``parseBoardReading returns None for null or empty results`` () =
         Assert.Equal(None, ChromeBoardDetector.parseBoardReading """{"id":1,"result":{"result":{"type":"null"}}}""")
         Assert.Equal(None, ChromeBoardDetector.parseBoardReading """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[]}}}}""")

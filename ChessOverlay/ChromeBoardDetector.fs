@@ -248,27 +248,23 @@ module ChromeBoardDetector =
         with _ ->
             None
 
+    let private colorsByCode =
+        Map.ofList [ 'w', White; 'b', Black ]
+
+    let private kindCodes = "pnbrqk"
+    let private kindsByCode = [| Pawn; Knight; Bishop; Rook; Queen; King |]
+
+    let private colorFromCode code = Map.tryFind code colorsByCode
+
+    let private kindFromCode (code: char) =
+        let index = kindCodes.IndexOf(code)
+        if index < 0 then None else Some kindsByCode[index]
+
     let private pieceFromCode (code: string) =
         if String.IsNullOrWhiteSpace code || code.Length <> 2 then
             None
         else
-            let color =
-                match code[0] with
-                | 'w' -> Some White
-                | 'b' -> Some Black
-                | _ -> None
-
-            let kind =
-                match code[1] with
-                | 'p' -> Some Pawn
-                | 'n' -> Some Knight
-                | 'b' -> Some Bishop
-                | 'r' -> Some Rook
-                | 'q' -> Some Queen
-                | 'k' -> Some King
-                | _ -> None
-
-            Option.map2 (fun c k -> { Color = c; Kind = k }) color kind
+            Option.map2 (fun color kind -> { Color = color; Kind = kind }) (colorFromCode code[0]) (kindFromCode code[1])
 
     let private screenSquareFromChessSquare orientation (value: string) =
         if String.IsNullOrWhiteSpace value || value.Length <> 2 then
@@ -276,8 +272,9 @@ module ChromeBoardDetector =
         else
             let file = int value[0] - int '1'
             let chessRank = int value[1] - int '1'
+            let isInBounds value = value >= 0 && value <= 7
 
-            if file < 0 || file > 7 || chessRank < 0 || chessRank > 7 then
+            if not (isInBounds file && isInBounds chessRank) then
                 None
             elif orientation = "black" then
                 Some { File = 7 - file; Rank = chessRank }
@@ -320,25 +317,31 @@ module ChromeBoardDetector =
     let private tryReadBoardFromTab (tab: ChromeTab) = evalAndParse boardStateScript parseBoardReading tab
 
     type ChromeBoardReader() =
-        interface IBoardReader with
-            member _.Read(_, _) =
-                async {
-                    match! tryListTabs () with
-                    | None -> return None
-                    | Some tabs ->
-                        let chessTabs = tabs |> List.filter isChessSiteTab
-                        let! readings = chessTabs |> List.map tryReadBoardFromTab |> Async.Parallel
+        member _.ReadDom() =
+            async {
+                match! tryListTabs () with
+                | None -> return None
+                | Some tabs ->
+                    let chessTabs = tabs |> List.filter isChessSiteTab
+                    let! readings = chessTabs |> List.map tryReadBoardFromTab |> Async.Parallel
 
-                        match readings |> Array.tryPick id with
-                        | Some reading -> return Some reading
-                        | None ->
-                            let! fens = chessTabs |> List.map tryReadFenFromTab |> Async.Parallel
-                            return
-                                fens
-                                |> Array.tryPick id
-                                |> Option.bind (BoardReaderHelpers.readingFromFenWithStrategy "Chrome FEN")
-                }
-                |> Async.RunSynchronously
+                    match readings |> Array.tryPick id with
+                    | Some reading -> return Some reading
+                    | None ->
+                        let! fens = chessTabs |> List.map tryReadFenFromTab |> Async.Parallel
+                        return
+                            fens
+                            |> Array.tryPick id
+                            |> Option.bind (BoardReaderHelpers.readingFromFenWithStrategy "Chrome FEN")
+            }
+            |> Async.RunSynchronously
+
+        interface IBoardReader with
+            member this.Read(_, _) = this.ReadDom()
+
+        interface IDomBoardReader with
+            member _.IsDomAvailable = true
+            member this.ReadDom() = this.ReadDom()
 
     type ChromeFenReader() =
         inherit ChromeBoardReader()

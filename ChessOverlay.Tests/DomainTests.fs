@@ -55,3 +55,25 @@ module DomainTests =
     [<Fact>]
     let ``FEN parser rejects rank with too many piece positions`` () =
         Assert.True(Fen.parseBoard "ppppppppK/8/8/8/8/8/8/8 w - - 0 1" |> Result.isError)
+
+    [<Fact>]
+    let ``Board placement serializes empty runs and every piece kind`` () =
+        let board =
+            BoardState.empty
+            |> Map.add { File = 0; Rank = 0 } { Color = Black; Kind = Rook }
+            |> Map.add { File = 1; Rank = 0 } { Color = Black; Kind = Knight }
+            |> Map.add { File = 2; Rank = 0 } { Color = Black; Kind = Bishop }
+            |> Map.add { File = 3; Rank = 0 } { Color = Black; Kind = Queen }
+            |> Map.add { File = 4; Rank = 0 } { Color = Black; Kind = King }
+            |> Map.add { File = 5; Rank = 0 } { Color = Black; Kind = Bishop }
+            |> Map.add { File = 6; Rank = 0 } { Color = Black; Kind = Knight }
+            |> Map.add { File = 7; Rank = 0 } { Color = Black; Kind = Rook }
+            |> Map.add { File = 0; Rank = 1 } { Color = Black; Kind = Pawn }
+            |> Map.add { File = 3; Rank = 3 } { Color = White; Kind = Queen }
+            |> Map.add { File = 7; Rank = 6 } { Color = White; Kind = Pawn }
+            |> Map.add { File = 0; Rank = 7 } { Color = White; Kind = Rook }
+            |> Map.add { File = 1; Rank = 7 } { Color = White; Kind = Knight }
+            |> Map.add { File = 2; Rank = 7 } { Color = White; Kind = Bishop }
+            |> Map.add { File = 4; Rank = 7 } { Color = White; Kind = King }
+
+        Assert.Equal("rnbqkbnr/p7/8/3Q4/8/8/7P/RNB1K3", Fen.boardPlacement board)
