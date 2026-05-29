@@ -116,10 +116,22 @@ module Program =
             mode
 
     let tryGetBoardGeometry options selectBoardGeometry =
-        match options.BoardGeometry with
-        | Some geometry -> Some geometry
-        | None when options.IsDemo -> Some(centeredDemoGeometry ())
-        | None -> selectBoardGeometry ()
+        options.BoardGeometry
+        |> Option.orElseWith (fun () ->
+            if options.IsDemo then
+                Some(centeredDemoGeometry ())
+            else
+                selectBoardGeometry ())
+
+    // By default the overlay starts by scanning open Chrome tabs for a chess
+    // board rather than reusing the last saved board area, so it follows the
+    // board the user is actually looking at. Picks the first detected board;
+    // multiple boards can still be chosen via Ctrl+Shift+B.
+    [<ExcludeFromCodeCoverage>]
+    let private tryDetectChromeGeometry () =
+        match ChromeBoardDetector.detectBoards () |> Async.RunSynchronously with
+        | Ok(board :: _) -> Some board.Geometry
+        | _ -> None
 
     let private shouldUseTemplates options =
         options.PieceReader = Some "template"
@@ -166,10 +178,13 @@ module Program =
         FallbackBoardReader(chrome, template) :> IBoardReader, warning
 
     let private createReaderFromFen options environmentFen =
-        match configuredFen options environmentFen with
-        | Some value -> createFenReader value
-        | None when options.IsDemo -> createFenReader startingFen
-        | None -> createChromeFallbackReader "templates"
+        configuredFen options environmentFen
+        |> Option.map createFenReader
+        |> Option.defaultWith (fun () ->
+            if options.IsDemo then
+                createFenReader startingFen
+            else
+                createChromeFallbackReader "templates")
 
     let createReader options environmentFen =
         if shouldUseTemplates options then
@@ -284,5 +299,9 @@ module Program =
         Application.SetCompatibleTextRenderingDefault false
 
         let options = parseStartupOptions args
-        let initialGeometry = tryGetBoardGeometry options BoardGeometryStorage.tryLoad
+
+        // Default: scan Chrome for the board. When no Chrome board is detected
+        // the overlay starts unconfigured and prompts for Ctrl+Shift+B.
+        let initialGeometry = tryGetBoardGeometry options tryDetectChromeGeometry
+
         runOverlay options initialGeometry

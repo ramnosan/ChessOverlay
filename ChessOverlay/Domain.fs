@@ -133,12 +133,16 @@ module Fen =
 
         kind |> Option.map (fun pieceKind -> { Color = color; Kind = pieceKind })
 
+    let private addPiece rankIndex fileIndex value board =
+        pieceFromChar value
+        |> Option.map (fun piece -> Ok(Map.add { File = fileIndex; Rank = rankIndex } piece board, fileIndex + 1))
+        |> Option.defaultValue (Error(sprintf "Unsupported FEN piece '%c'." value))
+
     let private parsePiece rankIndex fileIndex value board =
-        match pieceFromChar value with
-        | Some piece when fileIndex < 8 ->
-            Ok(Map.add { File = fileIndex; Rank = rankIndex } piece board, fileIndex + 1)
-        | Some _ -> Error "FEN rank contains too many files."
-        | None -> Error(sprintf "Unsupported FEN piece '%c'." value)
+        if fileIndex < 8 then
+            addPiece rankIndex fileIndex value board
+        else
+            Error "FEN rank contains too many files."
 
     let private parseFenValue rankIndex value state =
         state
@@ -149,10 +153,12 @@ module Fen =
                 parsePiece rankIndex fileIndex value board)
 
     let private completeRank state =
-        match state with
-        | Ok(nextBoard, 8) -> Ok nextBoard
-        | Ok _ -> Error "Each FEN rank must describe exactly 8 files."
-        | Error message -> Error message
+        state
+        |> Result.bind (fun (board, fileIndex) ->
+            if fileIndex = 8 then
+                Ok board
+            else
+                Error "Each FEN rank must describe exactly 8 files.")
 
     let private parseRank rankIndex rank board =
         rank
@@ -192,16 +198,18 @@ module Fen =
         if emptyCount > 0 then
             builder.Append(emptyCount) |> ignore
 
-    let private appendRank (board: BoardState) rank (builder: StringBuilder) =
-        let mutable emptyCount = 0
+    let private appendSquareInRank (board: BoardState) rank (builder: StringBuilder) file emptyCount =
+        match Map.tryFind { File = file; Rank = rank } board with
+        | Some piece ->
+            appendEmptyRun builder emptyCount
+            builder.Append(pieceToChar piece) |> ignore
+            0
+        | None -> emptyCount + 1
 
-        for file in 0 .. 7 do
-            match Map.tryFind { File = file; Rank = rank } board with
-            | Some piece ->
-                appendEmptyRun builder emptyCount
-                emptyCount <- 0
-                builder.Append(pieceToChar piece) |> ignore
-            | None -> emptyCount <- emptyCount + 1
+    let private appendRank (board: BoardState) rank (builder: StringBuilder) =
+        let emptyCount =
+            [ 0 .. 7 ]
+            |> List.fold (fun emptyCount file -> appendSquareInRank board rank builder file emptyCount) 0
 
         appendEmptyRun builder emptyCount
 

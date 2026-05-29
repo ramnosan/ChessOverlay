@@ -15,6 +15,7 @@ Commands:
   dry     Find candidate duplicate F# code.
   crap    Compute CRAP-style risk scores for app F# code.
   arch    Generate a layered architecture view for ChessOverlay.
+  mutate  Run source-level mutation testing over the pure F# core.
 
 ALL usage:
   dotnet run --project ChessOverlay.Quality
@@ -43,6 +44,29 @@ ARCH usage:
 ARCH options:
   --format <f>       text or html. Default: text.
   --out <file>       Write output to a file instead of stdout.
+
+MUTATE usage:
+  dotnet run --project ChessOverlay.Quality -- mutate
+  dotnet run --project ChessOverlay.Quality -- mutate --max-mutants 20 --threshold 0.6
+  dotnet run --project ChessOverlay.Quality -- mutate --scan
+  dotnet run --project ChessOverlay.Quality -- mutate --max-workers 4 --timeout-factor 10
+
+Mutates Domain.fs and AttackCalculator.fs across six operator families (arithmetic,
+comparison, equality, boolean, logical, and the constant 0<->1), then runs the test
+suite per mutant. This provides equivalent coverage for the pure core. Inspired by
+unclebob/mutate4go.
+
+MUTATE options:
+  --changed          Mutate changed core .fs files only.
+  --since-last-run   Mutate only functions whose body changed since the last manifest.
+  --scan             Report mutation-site counts only; no builds or tests.
+  --update-manifest  Rewrite the embedded function manifest without mutating.
+  --max-mutants <n>  Cap how many covered mutants are run. Default: all.
+  --stop-after-survivors <n>  Stop after N surviving mutants are found. Default: 10; 0 disables.
+  --max-workers <n>  Run mutants in parallel using N isolated project copies. Default: 1.
+  --timeout-factor <n>  Bound each mutant's test run at N x the baseline duration.
+  --threshold <n>    Minimum mutation score (killed / live). Default: 0.70.
+  --coverage <file>  Use a Cobertura coverage XML file instead of generating fresh coverage.
 """
 
     let private findRepositoryRoot () =
@@ -111,6 +135,21 @@ ARCH options:
             | [] -> List.rev inputs
             | "--coverage" :: _ :: tail
             | "--threshold" :: _ :: tail -> loop tail inputs
+            | value :: tail when value.StartsWith("--") -> loop tail inputs
+            | value :: tail -> loop tail (value :: inputs)
+
+        loop args []
+
+    let private mutateInputs (args: string list) =
+        let rec loop remaining inputs =
+            match remaining with
+            | [] -> List.rev inputs
+            | "--coverage" :: _ :: tail
+            | "--threshold" :: _ :: tail
+            | "--max-mutants" :: _ :: tail
+            | "--stop-after-survivors" :: _ :: tail
+            | "--max-workers" :: _ :: tail
+            | "--timeout-factor" :: _ :: tail -> loop tail inputs
             | value :: tail when value.StartsWith("--") -> loop tail inputs
             | value :: tail -> loop tail (value :: inputs)
 
@@ -271,6 +310,142 @@ ARCH options:
             eprintfn "%s" ex.Message
             2
 
+    let private categoryName (category: MutationCategory) =
+        match category with
+        | Arithmetic -> "arithmetic"
+        | Comparison -> "comparison"
+        | Equality -> "equality"
+        | Boolean -> "boolean"
+        | Logical -> "logical"
+        | Constant -> "constant"
+
+    let private printMutationReport (threshold: float) (stopAfterSurvivors: int option) (report: MutationReport) =
+        let detected = report.Killed + report.Timeout
+        let live = detected + report.Survived
+
+        printfn
+            "Mutation score: %s (%i killed of %i live mutants)"
+            (report.Score.ToString("P0", CultureInfo.InvariantCulture))
+            detected
+            live
+
+        printfn
+            "  killed=%i timeout=%i survived=%i no-coverage=%i compile-error=%i total=%i"
+            report.Killed
+            report.Timeout
+            report.Survived
+            report.NoCoverage
+            report.CompileErrors
+            report.Total
+
+        if not (List.isEmpty report.Survivors) then
+            let survivorsToReport =
+                match stopAfterSurvivors with
+                | Some limit when limit > 0 -> report.Survivors |> List.truncate limit
+                | _ -> report.Survivors
+
+            printfn ""
+            printfn "Survivors (test gaps):"
+
+            for mutant in survivorsToReport do
+                printfn
+                    "  %s:%i  %s  [%s]  %s"
+                    (mutant.File.Replace('\\', '/'))
+                    mutant.Line
+                    (MutationTesting.description mutant)
+                    (categoryName mutant.Category)
+                    mutant.FunctionId
+
+            let hidden = report.Survivors.Length - survivorsToReport.Length
+
+            if hidden > 0 then
+                printfn "  ... %i additional survivor(s) not shown." hidden
+
+            match stopAfterSurvivors with
+            | Some limit when limit > 0 && report.Survived >= limit ->
+                printfn ""
+                printfn "Stopped after %i surviving mutants were found." limit
+            | _ -> ()
+
+            printfn "AI agent instruction: Fix the reported surviving mutants, then rerun mutation testing."
+
+        if report.Score < threshold then
+            printfn ""
+            printfn "Mutation score below threshold %s." (threshold.ToString("P0", CultureInfo.InvariantCulture))
+
+    let private parseOptionalInt name args =
+        tryPopValue name args
+        |> Option.bind (fun value ->
+            match Int32.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture) with
+            | true, parsed -> Some parsed
+            | _ -> None)
+
+    let private parseStopAfterSurvivors args =
+        let value = parseOptionalInt "--stop-after-survivors" args |> Option.defaultValue 10
+
+        if value <= 0 then None else Some value
+
+    let private mutateOptions root args =
+        {
+            Root = root
+            Inputs = mutateInputs args
+            ChangedOnly = args |> List.contains "--changed"
+            MaxMutants = parseOptionalInt "--max-mutants" args
+            StopAfterSurvivors = parseStopAfterSurvivors args
+            Threshold = parseFloat "--threshold" 0.70 args
+            CoveragePath = None
+            SinceLastRun = args |> List.contains "--since-last-run"
+            MaxWorkers = parseInt "--max-workers" 1 args
+            TimeoutFactor = parseOptionalInt "--timeout-factor" args
+        }
+
+    let private runMutate args =
+        try
+            let root = findRepositoryRoot ()
+
+            // --scan and --update-manifest are fast, structural modes that never build
+            // or run tests, matching mutate4go.
+            if args |> List.contains "--scan" then
+                let options = { mutateOptions root args with CoveragePath = None }
+                let result = MutationTesting.scan options
+                printfn "Total mutation sites: %i" result.Total
+                printfn "Changed mutation sites: %i" result.Changed
+                printfn "Manifest exists: %b" result.HasManifest
+                0
+            elif args |> List.contains "--update-manifest" then
+                let options = mutateOptions root args
+                let files = MutationTesting.updateManifests options
+                for file in files do
+                    printfn "Updated manifest: %s" (file.Replace('\\', '/'))
+                0
+            else
+                let baseOptions = mutateOptions root args
+                let threshold = baseOptions.Threshold
+                let options = { baseOptions with CoveragePath = resolveCoverage root args }
+
+                // A per-mutant timeout needs a baseline; measure the clean suite once.
+                let testTimeoutMs =
+                    options.TimeoutFactor
+                    |> Option.map (fun factor ->
+                        printfn "Measuring baseline test duration for timeout..."
+                        let baseline = MutationTesting.measureBaselineMs root
+                        max 1000 (factor * baseline))
+
+                let report =
+                    if options.MaxWorkers > 1 then
+                        let evaluate = MutationTesting.Runner.buildAndTestEvaluator testTimeoutMs
+                        MutationTesting.runBatch options (MutationTesting.Runner.runMutationsParallelUntil root options.MaxWorkers options.StopAfterSurvivors evaluate)
+                    else
+                        let runner = MutationTesting.makeRunnerWithTimeout root testTimeoutMs
+                        MutationTesting.run options runner
+
+                printMutationReport threshold options.StopAfterSurvivors report
+
+                if report.Score < threshold then 2 else 0
+        with ex ->
+            eprintfn "%s" ex.Message
+            2
+
     let private runAll () =
         printfn "DRY"
         printfn "%s" (String('-', 78))
@@ -330,5 +505,6 @@ ARCH options:
         | "dry" :: tail -> runDry tail
         | "crap" :: tail -> runCrap tail
         | "arch" :: tail -> runArch tail
+        | "mutate" :: tail -> runMutate tail
         | [] -> runAll ()
         | _ -> runDry args

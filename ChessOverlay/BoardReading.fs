@@ -77,6 +77,16 @@ type LastBoardStateReader(
     ?minimumConfidence: float) =
     let minimumConfidence = defaultArg minimumConfidence BoardReadingConfidence.minimumUsable
 
+    let resolveReading reading onConfident onLowConfidence onMissing =
+        reading
+        |> Option.map (fun value ->
+            if value.Confidence >= minimumConfidence then
+                saveLastBoard value.Board
+                onConfident value
+            else
+                onLowConfidence value)
+        |> Option.defaultWith onMissing
+
     let savedReading () =
         loadLastBoard ()
         |> Option.map (fun board ->
@@ -88,22 +98,10 @@ type LastBoardStateReader(
             })
 
     let usePrimaryReading reading =
-        match reading with
-        | Some value when value.Confidence >= minimumConfidence ->
-            saveLastBoard value.Board
-            Some value
-        | Some value ->
-            savedReading ()
-            |> Option.orElseWith (fun () -> Some value)
-        | None -> savedReading ()
+        resolveReading reading Some (fun value -> savedReading () |> Option.orElseWith (fun () -> Some value)) savedReading
 
     let usePrimaryDomReading reading =
-        match reading with
-        | Some value when value.Confidence >= minimumConfidence ->
-            saveLastBoard value.Board
-            Some value
-        | Some value -> Some value
-        | None -> None
+        resolveReading reading Some Some (fun () -> None)
 
     let domReader () =
         match primary with

@@ -6,19 +6,19 @@ module AttackCalculator =
     // ray per target. Keeping the per-direction grouping lets us draw a single
     // arrow to the farthest reachable square instead of one per square.
     let private rayLine board square fileDelta rankDelta =
-        let rec loop file rank acc =
-            match Squares.tryCreate file rank with
-            | None -> acc
-            | Some target ->
-                let acc = target :: acc
+        Seq.unfold
+            (fun state ->
+                state
+                |> Option.bind (fun (file, rank) ->
+                    Squares.tryCreate file rank
+                    |> Option.map (fun target ->
+                        let nextState =
+                            if BoardState.occupied target board then None
+                            else Some(file + fileDelta, rank + rankDelta)
 
-                if BoardState.occupied target board then
-                    acc
-                else
-                    loop (file + fileDelta) (rank + rankDelta) acc
-
-        loop (square.File + fileDelta) (square.Rank + rankDelta) []
-        |> List.rev
+                        target, nextState)))
+            (Some(square.File + fileDelta, square.Rank + rankDelta))
+        |> List.ofSeq
 
     let private steps deltas square =
         deltas
@@ -119,21 +119,20 @@ module AttackCalculator =
         | [] -> None
         | _ -> Some(List.average ranks)
 
-    // Rank 0 is the top of the screen, so the colour with the lower mean rank
-    // is on top. Use 8.0 (off-board) as a sentinel for an absent colour so
-    // a present colour always has a lower rank than an absent one.
-    let private colorAtTop board =
-        let wr = meanRank White board |> Option.defaultValue 8.0
-        let br = meanRank Black board |> Option.defaultValue 8.0
-        if wr <= br then White else Black
-
     // The top player is always the enemy, but they may be either colour (the
     // user plays both sides).
     let enemyColor (board: BoardState) : PieceColor option =
-        match meanRank White board, meanRank Black board with
-        | None, None -> None
-        | Some _, None -> Some White
-        | _ -> Some(colorAtTop board)
+        let whiteRank = meanRank White board
+        let blackRank = meanRank Black board
+
+        Option.map2 (fun wr br -> if wr <= br then White else Black) whiteRank blackRank
+        |> Option.orElseWith (fun () ->
+            if whiteRank.IsSome then
+                Some White
+            elif blackRank.IsSome then
+                Some Black
+            else
+                None)
 
     let enemyAttackedSquares (board: BoardState) =
         match enemyColor board with
@@ -145,9 +144,7 @@ module AttackCalculator =
         |> List.choose (fun ray -> List.tryLast ray |> Option.map (fun far -> square, far))
 
     let private withEnemyColor board (f: PieceColor -> (Square * Square) list) =
-        match enemyColor board with
-        | None -> []
-        | Some color -> f color
+        enemyColor board |> Option.map f |> Option.defaultValue []
 
     // One arrow per direction a piece can move, ending at the farthest square
     // it can see/attack along that ray.
@@ -210,9 +207,9 @@ module AttackCalculator =
         |> Set.ofSeq
 
     let private withEnemyColors board f =
-        match enemyColor board with
-        | None -> Set.empty
-        | Some enemy -> f enemy (if enemy = White then Black else White)
+        enemyColor board
+        |> Option.map (fun enemy -> f enemy (if enemy = White then Black else White))
+        |> Option.defaultValue Set.empty
 
     // Friendly (bottom) pieces that are attacked by the enemy and either not
     // defended by another friendly piece or attacked by a lower-value piece.
@@ -233,18 +230,19 @@ module AttackCalculator =
         isOwnPiece board (oppositeColor color) square
 
     let private pawnMoveSquares board square color pawnRankDelta =
-        let oneStep =
-            Squares.tryCreate square.File (square.Rank + pawnRankDelta)
+        let tryAdvance steps =
+            Squares.tryCreate square.File (square.Rank + steps * pawnRankDelta)
             |> Option.filter (fun target -> not (BoardState.occupied target board))
+
+        let oneStep = tryAdvance 1
 
         let startRank = if pawnRankDelta = -1 then 6 else 1
 
         let twoStep =
-            match oneStep with
-            | Some _ when square.Rank = startRank ->
-                Squares.tryCreate square.File (square.Rank + pawnRankDelta * 2)
-                |> Option.filter (fun target -> not (BoardState.occupied target board))
-            | _ -> None
+            if oneStep.IsSome && square.Rank = startRank then
+                tryAdvance 2
+            else
+                None
 
         let captures =
             [ -1; 1 ]

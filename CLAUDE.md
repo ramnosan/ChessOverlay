@@ -121,6 +121,42 @@ only when intentionally analyzing a specific Cobertura XML file.
 dotnet run --project ChessOverlay.Quality -- arch --format html --out artifacts/architecture.html
 \\\
 
+**Mutation testing** (verifies the test suite actually catches regressions):
+\\\
+dotnet run --project ChessOverlay.Quality -- mutate
+\\\
+
+`mutate` is a custom source-level mutation tester living in ChessOverlay.Quality, modeled
+on [unclebob/mutate4go](https://github.com/unclebob/mutate4go). It rewrites six operator
+families in the pure core (Domain.fs, AttackCalculator.fs): arithmetic (`+ - * /`),
+comparison (`> >= < <=`), equality (`= <>`), boolean (`true false`), logical (`&& || not`),
+and the constant `0 <-> 1`. It then builds and runs the test suite per mutant. Each mutant
+is built first: build failures are reported as compile errors and excluded from the score,
+so the F# compiler acts as the safety net for malformed/equivalent mutants. Mutants on
+lines with no test coverage are skipped (reported as no-coverage). A mutant whose tests run
+past the timeout (see `--timeout-factor`) counts as killed. The mutation score is
+(killed + timeout) / (killed + timeout + survived); the command exits non-zero below
+`--threshold` (default 0.70).
+
+Every mutation site is tagged with its enclosing function. `--update-manifest` embeds a
+footer manifest of normalized per-function hashes into each core file, and `--since-last-run`
+then mutates only functions whose body changed since that manifest (differential mutation).
+`--scan` reports mutation-site counts (total and changed) without building or testing.
+`--max-workers <n>` runs mutants in parallel using isolated full-project copies, so the live
+working tree is never raced on.
+
+\\\
+dotnet run --project ChessOverlay.Quality -- mutate --changed --max-mutants 20 --threshold 0.6
+\\\
+
+Options: `--changed` (changed core files only), `--since-last-run` (only functions changed
+since the embedded manifest), `--scan` (counts only, no builds), `--update-manifest` (rewrite
+the embedded manifest without mutating), `--max-mutants <n>` (cap mutants run),
+`--max-workers <n>` (parallel isolated workers), `--timeout-factor <n>` (bound each mutant's
+test run at N x the baseline duration), `--threshold <n>` (minimum score), `--coverage <file>`
+(reuse a Cobertura XML instead of regenerating). Like CRAP, it generates fresh coverage by
+default to skip uncovered lines.
+
 Available Claude Code skill: **chessoverlay-quality** runs all three analyses.
 
 ## Architecture and Design
@@ -148,7 +184,7 @@ Available Claude Code skill: **chessoverlay-quality** runs all three analyses.
 
 4. **UI/Overlay Layer** (OverlayWindow.fs, OverlayController.fs, BoardSelectionWindow.fs)
    - OverlayWindow: Transparent borderless WinForms window (layered, click-through)
-   - OverlayController: Timer-driven polling (500ms) of board state, updates overlay
+   - OverlayController: Timer-driven polling (500ms screen / 30ms DOM) of board state, updates overlay
    - BoardSelectionWindow: Drag-to-select UI for defining board area
    - Program.fs: Startup orchestration, geometry persistence (AppData), CLI arguments
 
@@ -225,4 +261,4 @@ AttackCalculator.enemyColor uses mean rank: whichever color's pieces sit at lowe
 
 **Adjust confidence threshold**: Edit OverlayController.fs confidenceThreshold value (default 0.45).
 
-**Change board poll interval**: Pass scanIntervalMilliseconds to OverlayController constructor (default 500ms).
+**Change board poll interval**: Pass scanIntervalMilliseconds to OverlayController constructor (default 500ms screen scan; DOM reader polls at a fixed 30ms).

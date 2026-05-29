@@ -1,8 +1,9 @@
-namespace ChessOverlay.Tests
+namespace ChessOverlay.Tests.PropertyTests
 
 open Xunit
 open FsCheck
 open FsCheck.FSharp.GenBuilder
+open ChessOverlay.Tests
 open ChessOverlay
 
 module DomainPropertyTests =
@@ -12,7 +13,7 @@ module DomainPropertyTests =
     module P = FsCheck.FSharp.Prop
 
     let private runConfig =
-        Config.QuickThrowOnFailure.WithMaxTest(2000)
+        Config.QuickThrowOnFailure.WithMaxTest(2000).WithQuietOnSuccess(true)
 
     let private squareArb = A.fromGen Generators.genSquare
 

@@ -3,7 +3,24 @@ namespace ChessOverlay
 open System
 open System.Diagnostics.CodeAnalysis
 open System.Drawing
+open System.Runtime.InteropServices
 open System.Windows.Forms
+
+[<ExcludeFromCodeCoverage>]
+module internal SelectionNative =
+    [<DllImport("user32.dll")>]
+    extern bool SetForegroundWindow(IntPtr hWnd)
+
+    // Pulls a window the foreground while honouring the Windows foreground lock,
+    // which otherwise leaves a hotkey-launched dialog visible but unfocused.
+    let forceForeground (form: Form) =
+        try
+            form.TopMost <- true
+            form.Activate()
+            SetForegroundWindow(form.Handle) |> ignore
+            form.Focus() |> ignore
+        with _ ->
+            ()
 
 module BoardSelectionGeometry =
     let clientToCaptureGeometry (rectangle: Rectangle) =
@@ -45,9 +62,17 @@ type BoardSelectionWindow() as this =
     let mutable dragStart: Point option = None
     let mutable currentPoint: Point option = None
     let mutable selectedGeometry: BoardGeometry option = None
+    let mutable closing = false
 
     let currentSelection () =
         BoardSelectionGeometry.currentSelection dragStart currentPoint
+
+    let cancel () =
+        if not closing then
+            closing <- true
+            selectedGeometry <- None
+            this.DialogResult <- DialogResult.Cancel
+            this.Close()
 
     do
         this.FormBorderStyle <- FormBorderStyle.None
@@ -62,6 +87,14 @@ type BoardSelectionWindow() as this =
         this.KeyPreview <- true
         this.Text <- "Select chessboard"
 
+        // The selector is launched from a global hotkey, so the app is not the
+        // foreground process. Without forcing focus the full-screen overlay
+        // appears but swallows nothing - Esc goes to the app underneath and the
+        // user is trapped behind a dark screen. Grab focus on show, and bail out
+        // if focus is ever lost so the overlay can never strand the user.
+        this.Shown.Add(fun _ -> SelectionNative.forceForeground this)
+        this.Deactivate.Add(fun _ -> if not this.IsDisposed then cancel ())
+
     member _.SelectedGeometry = selectedGeometry
 
     override _.OnMouseDown(args) =
@@ -71,6 +104,9 @@ type BoardSelectionWindow() as this =
             dragStart <- Some args.Location
             currentPoint <- Some args.Location
             this.Invalidate()
+        elif args.Button = MouseButtons.Right then
+            // Second escape hatch alongside Esc, in case focus was not granted.
+            cancel ()
 
     override _.OnMouseMove(args) =
         base.OnMouseMove args
@@ -87,7 +123,17 @@ type BoardSelectionWindow() as this =
 
             match currentSelection () with
             | Some rectangle when rectangle.Width >= minimumSelectionSize ->
-                selectedGeometry <- Some(BoardSelectionGeometry.clientToCaptureGeometry rectangle)
+                // Client coords are relative to the form, which is positioned at
+                // the virtual-screen origin. Offset back to absolute virtual-
+                // screen coordinates so capture lines up on multi-monitor setups.
+                let absolute =
+                    Rectangle(
+                        rectangle.Left + virtualBounds.Left,
+                        rectangle.Top + virtualBounds.Top,
+                        rectangle.Width,
+                        rectangle.Height)
+                selectedGeometry <- Some(BoardSelectionGeometry.clientToCaptureGeometry absolute)
+                closing <- true
                 this.DialogResult <- DialogResult.OK
                 this.Close()
             | _ ->
@@ -99,9 +145,7 @@ type BoardSelectionWindow() as this =
         base.OnKeyDown args
 
         if args.KeyCode = Keys.Escape then
-            selectedGeometry <- None
-            this.DialogResult <- DialogResult.Cancel
-            this.Close()
+            cancel ()
 
     override _.OnPaint(args) =
         base.OnPaint args

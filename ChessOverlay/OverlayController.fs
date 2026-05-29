@@ -40,7 +40,7 @@ type OverlayController(
     ?scanIntervalMilliseconds: int) =
 
     let scanInterval = defaultArg scanIntervalMilliseconds 500
-    let domScanInterval = 75
+    let domScanInterval = 30
     let domReader =
         match reader with
         | :? IDomBoardReader as value when value.IsDomAvailable -> Some value

@@ -128,7 +128,10 @@ module ArchitectureView =
         candidateProjects
         |> Seq.filter (fun path ->
             not (path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            && not (path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")))
+            && not (path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            // Ignore git worktree copies (.worktrees/<name>/...) so duplicated
+            // project trees are not counted as separate modules.
+            && not (path.Contains($"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}")))
         |> Seq.sort
         |> Seq.collect readCompileIncludes
         |> Seq.distinctBy normalizePath

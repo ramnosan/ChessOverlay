@@ -30,11 +30,12 @@ Options: `--threshold <n>` (default 0.82), `--min-lines <n>` (default 4), `--min
 
 ### 3. CRAP — risk scores (needs coverage to be meaningful)
 
-CRAP combines cyclomatic complexity with test coverage. Without a coverage file it prints `N/A` for every function, so generate coverage first via the test project (it references `coverlet.collector`):
+CRAP combines cyclomatic complexity with test coverage. Without a coverage file it prints `N/A` for every function, so generate coverage first via the test project (it references `coverlet.collector`). The `--filter` excludes the slow FsCheck `*PropertyTests` modules (which run thousands of generated cases) — the fast example-based tests still run, so coverage stays meaningful:
 
 ```bash
 dotnet test ChessOverlay.Tests/ChessOverlay.Tests.fsproj -c Release \
-  --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
+  --collect:"XPlat Code Coverage" --results-directory artifacts/coverage \
+  --filter "FullyQualifiedName!~PropertyTests"
 ```
 
 That writes `artifacts/coverage/<guid>/coverage.cobertura.xml`. Feed the newest one to CRAP:

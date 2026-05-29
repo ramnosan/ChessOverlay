@@ -61,10 +61,10 @@ module CrapMetric =
         |> Seq.takeWhile (fun value -> value = ' ' || value = '\t')
         |> Seq.sumBy (fun value -> if value = '\t' then 4 else 1)
 
-    let private stripComments (line: string) =
+    let stripComments (line: string) =
         inlineCommentPattern.Replace(line, "")
 
-    let private stripStrings (line: string) =
+    let stripStrings (line: string) =
         let mutable inString = false
         let mutable escaped = false
         let chars = line.ToCharArray()
@@ -87,7 +87,7 @@ module CrapMetric =
 
         String(chars)
 
-    let private codeOnly line =
+    let codeOnly line =
         line |> stripComments |> stripStrings
 
     let private hasExcludeAttribute (line: string) =
@@ -386,6 +386,10 @@ module CrapMetric =
         startInfo.ArgumentList.Add(testProject)
         startInfo.ArgumentList.Add("--collect")
         startInfo.ArgumentList.Add("XPlat Code Coverage")
+        // Skip the slow FsCheck property-test modules during coverage generation.
+        // The fast example-based tests still run, so coverage stays meaningful.
+        startInfo.ArgumentList.Add("--filter")
+        startInfo.ArgumentList.Add("FullyQualifiedName!~PropertyTests")
         startInfo.ArgumentList.Add("--results-directory")
         startInfo.ArgumentList.Add(resultsDirectory)
         startInfo.ArgumentList.Add($"-p:BaseOutputPath={outputPath}")

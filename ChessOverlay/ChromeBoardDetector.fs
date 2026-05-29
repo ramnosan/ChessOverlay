@@ -140,6 +140,7 @@ module ChromeBoardDetector =
                 return None
         }
 
+    [<System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage>]
     let private readFullResponse (ws: ClientWebSocket) (cts: CancellationTokenSource) = async {
         let buf = Array.zeroCreate<byte> 65536
         let sb = StringBuilder()
@@ -220,11 +221,8 @@ module ChromeBoardDetector =
 
     let private detectFromTabs (tabs: ChromeTab list) =
         async {
-            if tabs.IsEmpty then
-                return Error "No Chrome tabs found. Make sure Chrome is open."
-            else
-                let! results = tabs |> List.map detectBoardInTab |> Async.Parallel
-                return Ok(results |> Array.choose id |> Array.toList)
+            let! results = tabs |> List.map detectBoardInTab |> Async.Parallel
+            return Ok(results |> Array.choose id |> Array.toList)
         }
 
     let detectBoards () =
@@ -235,6 +233,8 @@ module ChromeBoardDetector =
                 return
                     Error
                         "Chrome remote debugging is not available.\n\nStart Chrome with:\n  chrome.exe --remote-debugging-port=9222\n\nOr add --remote-debugging-port=9222 to a Chrome shortcut."
+            elif tabs.Value.IsEmpty then
+                return Error "No Chrome tabs found. Make sure Chrome is open."
             else
                 return! detectFromTabs tabs.Value
         }
@@ -260,6 +260,27 @@ module ChromeBoardDetector =
         let index = kindCodes.IndexOf(code)
         if index < 0 then None else Some kindsByCode[index]
 
+    let private tryParseChessSquareIndices (value: string) =
+        let file = int value[0] - int '1'
+        let chessRank = int value[1] - int '1'
+
+        Some(file, chessRank)
+
+    let private isValidChessSquare (file, chessRank) =
+        file >= 0 && file <= 7 && chessRank >= 0 && chessRank <= 7
+
+    let private tryParseChessSquare (value: string) =
+        if String.IsNullOrWhiteSpace value || value.Length <> 2 then
+            None
+        else
+            tryParseChessSquareIndices value |> Option.filter isValidChessSquare
+
+    let private screenSquareFromIndices orientation (file, chessRank) =
+        if orientation = "black" then
+            { File = 7 - file; Rank = chessRank }
+        else
+            { File = file; Rank = 7 - chessRank }
+
     let private pieceFromCode (code: string) =
         if String.IsNullOrWhiteSpace code || code.Length <> 2 then
             None
@@ -267,19 +288,8 @@ module ChromeBoardDetector =
             Option.map2 (fun color kind -> { Color = color; Kind = kind }) (colorFromCode code[0]) (kindFromCode code[1])
 
     let private screenSquareFromChessSquare orientation (value: string) =
-        if String.IsNullOrWhiteSpace value || value.Length <> 2 then
-            None
-        else
-            let file = int value[0] - int '1'
-            let chessRank = int value[1] - int '1'
-            let isInBounds value = value >= 0 && value <= 7
-
-            if not (isInBounds file && isInBounds chessRank) then
-                None
-            elif orientation = "black" then
-                Some { File = 7 - file; Rank = chessRank }
-            else
-                Some { File = file; Rank = 7 - chessRank }
+        tryParseChessSquare value
+        |> Option.map (screenSquareFromIndices orientation)
 
     let private parseBoardPiece orientation (value: JsonElement) =
         tryGetString value "piece" |> Option.bind (fun pieceCode ->

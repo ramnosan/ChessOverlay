@@ -1,8 +1,9 @@
-namespace ChessOverlay.Tests
+namespace ChessOverlay.Tests.PropertyTests
 
 open Xunit
 open FsCheck
 open FsCheck.FSharp.GenBuilder
+open ChessOverlay.Tests
 open ChessOverlay
 
 module AttackCalculatorPropertyTests =
@@ -25,7 +26,7 @@ module AttackCalculatorPropertyTests =
     let boardArb : Arbitrary<BoardState> = A.fromGen genBoardState
 
     let private runConfig =
-        Config.QuickThrowOnFailure.WithMaxTest(2000)
+        Config.QuickThrowOnFailure.WithMaxTest(2000).WithQuietOnSuccess(true)
 
     let private checkProp (propFunc: BoardState -> bool) =
         Check.One(runConfig, P.forAll boardArb propFunc)

@@ -42,6 +42,10 @@ module DryDuplication =
         Regex(
             @"^\s*(?:let\s+(?:(?:rec|inline|private|internal|public|mutable)\s+)*(?!(?:rec|inline|private|internal|public|mutable)\b)(?:``[^`]+``|[A-Za-z_][A-Za-z0-9_']*)\b|member\s+(?:(?:private|internal|public)\s+)*[^\s.]+\.(?:``[^`]+``|[A-Za-z_][A-Za-z0-9_']*)\b|type\s+(?:(?:private|internal|public)\s+)*(?:``[^`]+``|[A-Za-z_][A-Za-z0-9_']*)\b)",
             RegexOptions.Compiled)
+    let private letDeclarationPattern =
+        Regex(@"^\s*let\s+", RegexOptions.Compiled)
+    let private moduleBlockPattern =
+        Regex(@"^\s*module\s+.*=\s*$", RegexOptions.Compiled)
 
     let private keywords =
         set [
@@ -71,6 +75,25 @@ module DryDuplication =
         withoutBlockComments.Split([| "\r\n"; "\n" |], StringSplitOptions.None)
             |> Array.map (fun line -> inlineCommentPattern.Replace(line, ""))
             |> String.concat "\n"
+
+    let private isNestedIndentedLet (lines: string list) lineIndex lineIndent =
+        let rec loop previousIndex =
+            if previousIndex < 0 then
+                false
+            else
+                let previousLine = lines[previousIndex]
+
+                if String.IsNullOrWhiteSpace previousLine then
+                    loop (previousIndex - 1)
+                else
+                    let previousIndent = indentation previousLine
+
+                    if previousIndent < lineIndent then
+                        not (moduleBlockPattern.IsMatch previousLine)
+                    else
+                        loop (previousIndex - 1)
+
+        loop (lineIndex - 1)
 
     let private normalizeToken (value: string) =
         if value.StartsWith("\"", StringComparison.Ordinal) then
@@ -124,10 +147,16 @@ module DryDuplication =
 
         let starts =
             lines
-            |> List.mapi (fun index line -> index + 1, line)
-            |> List.choose (fun (lineNumber, line) ->
-                if declarationPattern.IsMatch(line) && indentation line <= 4 then
-                    Some(lineNumber, indentation line)
+            |> List.mapi (fun index line -> index, line)
+            |> List.choose (fun (index, line) ->
+                let lineIndent = indentation line
+                let isNestedLet =
+                    letDeclarationPattern.IsMatch(line)
+                    && lineIndent > 0
+                    && isNestedIndentedLet lines index lineIndent
+
+                if declarationPattern.IsMatch(line) && lineIndent <= 4 && not isNestedLet then
+                    Some(index + 1, lineIndent)
                 else
                     None)
 

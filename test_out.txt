@@ -1,0 +1,7 @@
+  Wiederherzustellende Projekte werden ermittelt...
+  Alle Projekte sind für die Wiederherstellung auf dem neuesten Stand.
+  ChessOverlay.Quality -> D:\Data\Prog\dotnet\ChessOverlay\ChessOverlay.Quality\bin\Debug\net10.0\ChessOverlay.Quality.dll
+  ChessOverlay -> D:\Data\Prog\dotnet\ChessOverlay\ChessOverlay\bin\Debug\net10.0-windows\ChessOverlay.dll
+  ChessOverlay.Tests -> D:\Data\Prog\dotnet\ChessOverlay\ChessOverlay.Tests\bin\Debug\net10.0-windows\ChessOverlay.Tests.dll
+Testlauf für "D:\Data\Prog\dotnet\ChessOverlay\ChessOverlay.Tests\bin\Debug\net10.0-windows\ChessOverlay.Tests.dll" (.NETCoreApp,Version=v10.0)
+Insgesamt 1 Testdateien stimmten mit dem angegebenen Muster überein.

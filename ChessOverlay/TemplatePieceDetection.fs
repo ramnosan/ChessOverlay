@@ -33,23 +33,32 @@ module PieceTemplates =
             "p", Pawn
         ]
 
+    let private tryParseCompactPieceName (name: string) =
+        if name.Length = 2 then
+            Some(string name[0], string name[1])
+        else
+            None
+
+    let private tryParseDelimitedPieceName (name: string) =
+        let parts = name.Split('_', StringSplitOptions.RemoveEmptyEntries)
+
+        if parts.Length >= 2 then
+            Some(parts[0], parts[1])
+        else
+            None
+
+    let private tryParsePieceName name =
+        tryParseCompactPieceName name |> Option.orElseWith (fun () -> tryParseDelimitedPieceName name)
+
     let private tryParsePiece (filename: string) =
         let name = Path.GetFileNameWithoutExtension(filename).ToLowerInvariant()
 
-        let parts =
-            if name.Length = 2 then
-                [ string name[0]; string name[1] ]
-            else
-                name.Split('_', StringSplitOptions.RemoveEmptyEntries)
-                |> Array.toList
-
-        match parts with
-        | colorName :: kindName :: _ ->
+        tryParsePieceName name
+        |> Option.bind (fun (colorName, kindName) ->
             Option.map2
                 (fun color kind -> { Color = color; Kind = kind })
                 (Map.tryFind colorName colors)
-                (Map.tryFind kindName kinds)
-        | _ -> None
+                (Map.tryFind kindName kinds))
 
     let loadAllFromDirectory (path: string) : (Piece * Bitmap) array =
         if not (Directory.Exists path) then
@@ -173,6 +182,16 @@ module BackgroundIsolation =
             visited[p] <- true
             queue.Enqueue(struct (x, y))
 
+    let private enqueueNeighbours (w: int) (h: int) (tryVisit: int -> int -> unit) x y =
+        tryVisit (x - 1) y
+        tryVisit (x + 1) y
+        tryVisit x (y - 1)
+        tryVisit x (y + 1)
+
+    let private tryVisitBackground (w: int) (h: int) (isBackground: int -> int -> bool) (visited: bool[]) (queue: System.Collections.Generic.Queue<struct (int * int)>) x y =
+        if x >= 0 && x < w && y >= 0 && y < h then
+            enqueueIfBackground x y w isBackground visited queue
+
     let private seedBorderQueue (w: int) (h: int) (enqueue: int -> int -> unit) =
         for x in 0 .. w - 1 do
             enqueue x 0
@@ -187,15 +206,9 @@ module BackgroundIsolation =
             (visited: bool[])
             (queue: System.Collections.Generic.Queue<struct (int * int)>)
             =
-        let tryVisit x y =
-            if x >= 0 && x < w && y >= 0 && y < h then
-                enqueueIfBackground x y w isBackground visited queue
         while queue.Count > 0 do
             let struct (x, y) = queue.Dequeue()
-            tryVisit (x - 1) y
-            tryVisit (x + 1) y
-            tryVisit x (y - 1)
-            tryVisit x (y + 1)
+            enqueueNeighbours w h (tryVisitBackground w h isBackground visited queue) x y
 
     let isolate (bitmap: Bitmap) : Bitmap =
         let w = bitmap.Width
@@ -454,6 +467,47 @@ module SimilarityComparison =
     // mask lets matching ignore whatever colour the live square happens to be.
     let private minPieceFraction = 0.1
 
+    let private readScaledGrayAndMask (source: Bitmap) =
+        use scaled = new Bitmap(sampleSize, sampleSize, PixelFormat.Format32bppArgb)
+        (use g = Graphics.FromImage(scaled)
+         g.InterpolationMode <- InterpolationMode.Bilinear
+         g.PixelOffsetMode <- PixelOffsetMode.HighQuality
+         g.Clear(Color.Transparent)
+         g.DrawImage(source, 0, 0, sampleSize, sampleSize))
+
+        let bounds = Rectangle(0, 0, sampleSize, sampleSize)
+        let data = scaled.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
+
+        try
+            let stride = data.Stride
+            let bytes = Array.zeroCreate<byte> (stride * sampleSize)
+            Marshal.Copy(data.Scan0, bytes, 0, bytes.Length)
+
+            let gray = Array.zeroCreate<float> (sampleSize * sampleSize)
+            let mask = Array.zeroCreate<bool> (sampleSize * sampleSize)
+
+            for i in 0 .. sampleSize * sampleSize - 1 do
+                let x = i % sampleSize
+                let y = i / sampleSize
+                let offset = y * stride + x * 4
+                let b = float bytes[offset]
+                let gr = float bytes[offset + 1]
+                let r = float bytes[offset + 2]
+                gray[i] <- (r + gr + b) / 3.0
+                mask[i] <- bytes[offset + 3] > 127uy
+
+            gray, mask
+        finally
+            scaled.UnlockBits(data)
+
+    let private normalizePieceMask gray rawMask =
+        let pieceCount = rawMask |> Array.sumBy (fun m -> if m then 1 else 0)
+
+        if float pieceCount < float (sampleSize * sampleSize) * minPieceFraction then
+            blur gray, Array.create (sampleSize * sampleSize) true
+        else
+            maskedBlur gray rawMask, erodeMask rawMask
+
     let toGrayscaleAndMask (bitmap: Bitmap) : float[] * bool[] =
         let isolated =
             if BackgroundIsolation.hasTransparency bitmap then None
@@ -461,49 +515,13 @@ module SimilarityComparison =
 
         let source = isolated |> Option.defaultValue bitmap
 
-        let gray, rawMask =
-            use scaled = new Bitmap(sampleSize, sampleSize, PixelFormat.Format32bppArgb)
-            (use g = Graphics.FromImage(scaled)
-             g.InterpolationMode <- InterpolationMode.Bilinear
-             g.PixelOffsetMode <- PixelOffsetMode.HighQuality
-             g.Clear(Color.Transparent)
-             g.DrawImage(source, 0, 0, sampleSize, sampleSize))
-
-            let bounds = Rectangle(0, 0, sampleSize, sampleSize)
-            let data = scaled.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
-
-            try
-                let stride = data.Stride
-                let bytes = Array.zeroCreate<byte> (stride * sampleSize)
-                Marshal.Copy(data.Scan0, bytes, 0, bytes.Length)
-
-                let gray = Array.zeroCreate<float> (sampleSize * sampleSize)
-                let mask = Array.zeroCreate<bool> (sampleSize * sampleSize)
-
-                for i in 0 .. sampleSize * sampleSize - 1 do
-                    let x = i % sampleSize
-                    let y = i / sampleSize
-                    let offset = y * stride + x * 4
-                    let b = float bytes[offset]
-                    let gr = float bytes[offset + 1]
-                    let r = float bytes[offset + 2]
-                    gray[i] <- (r + gr + b) / 3.0
-                    mask[i] <- bytes[offset + 3] > 127uy
-
-                gray, mask
-            finally
-                scaled.UnlockBits(data)
+        let gray, rawMask = readScaledGrayAndMask source
 
         isolated |> Option.iter (fun b -> b.Dispose())
 
         // If isolation leaves almost nothing (e.g. a borderless or full-bleed
         // template), fall back to comparing the whole square.
-        let pieceCount = rawMask |> Array.sumBy (fun m -> if m then 1 else 0)
-
-        if float pieceCount < float (sampleSize * sampleSize) * minPieceFraction then
-            blur gray, Array.create (sampleSize * sampleSize) true
-        else
-            maskedBlur gray rawMask, erodeMask rawMask
+        normalizePieceMask gray rawMask
 
     let piecePresenceScore (sample: float[]) =
         let centerStart = sampleSize / 4

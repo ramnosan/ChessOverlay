@@ -153,6 +153,10 @@ type ChromeBoardSelectionDialog() as this =
         layout.Controls.Add(btnPanel, 0, 2)
         this.Controls.Add layout
 
+        // Esc cancels; the dialog is launched from a global hotkey so it is not
+        // automatically the foreground window - force focus once shown.
+        this.CancelButton <- cancelButton
+        this.Shown.Add(fun _ -> SelectionNative.forceForeground this)
         this.Load.Add(fun _ -> scan ())
 
     member _.SelectedGeometry = selectedGeometry
