@@ -130,6 +130,7 @@ module TemplatePieceDetectionTests =
         saveBitmap (Path.Combine(root, "wk.png")) Color.White
         saveBitmap (Path.Combine(root, "black_queen.bmp")) Color.Black
         saveBitmap (Path.Combine(root, "unknown.png")) Color.Red
+        saveBitmap (Path.Combine(root, "unknown.bmp")) Color.Red
 
         let templates = PieceTemplates.loadFromDirectory root
 
@@ -139,6 +140,25 @@ module TemplatePieceDetectionTests =
             Assert.True(templates.ContainsKey { Color = Black; Kind = Queen })
         finally
             disposeTemplates templates
+
+    [<Fact>]
+    let ``Template loader reports invalid image files`` () =
+        let root = tempRoot ()
+        File.WriteAllText(Path.Combine(root, "white_king.png"), "not an image")
+
+        Assert.ThrowsAny<System.Exception>(fun () -> PieceTemplates.loadAllFromDirectory root |> ignore) |> ignore
+
+    [<Fact>]
+    let ``extractSquareBitmap returns none when square is outside bitmap`` () =
+        use bitmap = new Bitmap(10, 10)
+
+        Assert.True(PieceBitmap.extractSquareBitmap bitmap { Left = 100; Top = 100; Size = 80 } { File = 0; Rank = 0 } |> Option.isNone)
+
+    [<Fact>]
+    let ``hasTransparency returns false for non-alpha bitmaps`` () =
+        use bitmap = new Bitmap(8, 8, System.Drawing.Imaging.PixelFormat.Format24bppRgb)
+
+        Assert.False(BackgroundIsolation.hasTransparency bitmap)
 
     [<Fact>]
     let ``Template reader matches a single real piece square`` () =
@@ -231,6 +251,19 @@ module TemplatePieceDetectionTests =
             disposeTemplates pieceImages
 
     [<Fact>]
+    let ``Thin transparent templates keep their raw mask when erosion removes the piece`` () =
+        use bitmap = new Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb)
+
+        for y in 0 .. 15 do
+            for x in 0 .. 15 do
+                if (x + y) % 2 = 0 then
+                    bitmap.SetPixel(x, y, Color.FromArgb(255, 20, 20, 20))
+
+        let _, mask = SimilarityComparison.toGrayscaleAndMask bitmap
+
+        Assert.True(mask |> Array.exists id)
+
+    [<Fact>]
     let ``Template matcher accepts lower-scoring pawns before other pieces`` () =
         let pawn = { Color = White; Kind = Pawn }
         let knight = { Color = White; Kind = Knight }
@@ -280,6 +313,16 @@ module TemplatePieceDetectionTests =
             Assert.Equal(12, templates.Count)
         finally
             disposeTemplates templates
+
+    [<Fact>]
+    let ``Template calibration skips squares outside the bitmap`` () =
+        let root = tempRoot ()
+        use bitmap = new Bitmap(10, 10)
+
+        let savedCount =
+            PieceTemplateCalibration.saveStartingPositionTemplates bitmap { Left = 100; Top = 100; Size = 80 } root
+
+        Assert.Equal(0, savedCount)
 
     [<Fact>]
     let ``Template reader detects all pieces from freshly calibrated templates`` () =

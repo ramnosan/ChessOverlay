@@ -55,6 +55,9 @@ module ChromeBoardDetector =
         })()"""
 
     // Reads the current FEN from a chess.com chess-board element via the game object.
+    // Returns { fen, hidden } rather than a bare string so the hidden decision is made
+    // in F# (parseFen), consistent with boardStateScript. A minimized tab still exposes
+    // the game object, so hidden must be reported, not silently dropped here.
     let private fenScript =
         """(() => {
             try {
@@ -62,10 +65,12 @@ module ChromeBoardDetector =
                 if (!cb) return null;
                 const g = cb.game;
                 if (!g) return null;
-                if (typeof g.getFen === 'function') return g.getFen();
-                if (typeof g.fen === 'function') return g.fen();
-                if (typeof g.fen === 'string') return g.fen;
-                return null;
+                let fen = null;
+                if (typeof g.getFen === 'function') fen = g.getFen();
+                else if (typeof g.fen === 'function') fen = g.fen();
+                else if (typeof g.fen === 'string') fen = g.fen;
+                if (!fen) return null;
+                return { fen, hidden: document.hidden === true };
             } catch (e) { return null; }
         })()"""
 
@@ -102,7 +107,7 @@ module ChromeBoardDetector =
                 }
 
                 if (!pieces.length) return null;
-                return { orientation, pieces };
+                return { orientation, hidden: document.hidden === true, pieces };
             } catch (e) { return null; }
         })()"""
 
@@ -117,6 +122,14 @@ module ChromeBoardDetector =
 
     let private tryGetInt (el: JsonElement) (name: string) =
         tryGet el name |> Option.map (fun v -> v.GetInt32()) |> Option.toValueOption
+
+    // A minimized or background tab reports document.hidden = true. Both read scripts
+    // emit this flag (the FEN read as a string-or-bool) so the decision lives in F#.
+    let private isHidden (value: JsonElement) =
+        tryGet value "hidden"
+        |> Option.exists (fun h ->
+            h.ValueKind = JsonValueKind.True
+            || (h.ValueKind = JsonValueKind.String && h.GetString() = "true"))
 
     // Option.bind chain — avoids match/with keywords so CC stays at 1.
     let private tryBuildTab (tab: JsonElement) =
@@ -239,12 +252,18 @@ module ChromeBoardDetector =
                 return! detectFromTabs tabs.Value
         }
 
+    // A bare string is the legacy CDP shape; an object carries the hidden flag so a
+    // minimized tab yields no FEN even though its game object still exposes the position.
+    let private fenFromValue (v: JsonElement) =
+        if v.ValueKind = JsonValueKind.String then Some(v.GetString())
+        elif v.ValueKind = JsonValueKind.Object && not (isHidden v) then tryGetString v "fen"
+        else None
+
     let internal parseFen (response: string) =
         try
             use doc = JsonDocument.Parse response
             tryGet doc.RootElement "result" |> Option.bind (fun r1 ->
-                tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind (fun v ->
-                    if v.ValueKind = JsonValueKind.String then Some(v.GetString()) else None))
+                tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind fenFromValue)
         with _ ->
             None
 
@@ -305,7 +324,7 @@ module ChromeBoardDetector =
                 tryGet r1 "result" |> Option.bind tryGetBoardValue |> Option.bind (fun value ->
                     tryGetString value "orientation" |> Option.bind (fun orientation ->
                     tryGet value "pieces" |> Option.bind (fun pieces ->
-                        if pieces.ValueKind <> JsonValueKind.Array then
+                        if isHidden value || pieces.ValueKind <> JsonValueKind.Array then
                             None
                         else
                             let board =

@@ -24,6 +24,8 @@
     <Compile Include="ProgramTests.fs" />
     <Compile Include="BoardSelectionWindowTests.fs" />
     <Compile Include="ChromeBoardDetectorTests.fs" />
+    <Compile Include="ChromeBoardSelectionDialogTests.fs" />
+    <Compile Include="ChromeMinimizedOverlayTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

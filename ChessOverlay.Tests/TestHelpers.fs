@@ -10,6 +10,22 @@ module TestHelpers =
         Directory.CreateDirectory(root) |> ignore
         root
 
+    let repositoryRoot () =
+        let rec loop (directory: DirectoryInfo) =
+            if File.Exists(Path.Combine(directory.FullName, "ChessOverlay.slnx")) then
+                directory.FullName
+            elif isNull directory.Parent then
+                Directory.GetCurrentDirectory()
+            else
+                loop directory.Parent
+
+        loop (DirectoryInfo(Directory.GetCurrentDirectory()))
+
+    let boardFromFen fen =
+        match ChessOverlay.Fen.parseBoard fen with
+        | Ok board -> board
+        | Error message -> failwith message
+
 /// FsCheck generators shared across the property-test suites.
 module Generators =
     open FsCheck.FSharp.GenBuilder

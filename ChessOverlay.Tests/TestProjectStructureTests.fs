@@ -6,19 +6,8 @@ open System.Xml.Linq
 open Xunit
 
 module TestProjectStructureTests =
-    let private repositoryRoot () =
-        let rec loop (directory: DirectoryInfo) =
-            if File.Exists(Path.Combine(directory.FullName, "ChessOverlay.slnx")) then
-                directory.FullName
-            elif isNull directory.Parent then
-                Directory.GetCurrentDirectory()
-            else
-                loop directory.Parent
-
-        loop (DirectoryInfo(Directory.GetCurrentDirectory()))
-
     let private testsRoot () =
-        Path.Combine(repositoryRoot (), "ChessOverlay.Tests")
+        Path.Combine(TestHelpers.repositoryRoot (), "ChessOverlay.Tests")
 
     let private compileIncludes () =
         let projectFile = Path.Combine(testsRoot (), "ChessOverlay.Tests.fsproj")

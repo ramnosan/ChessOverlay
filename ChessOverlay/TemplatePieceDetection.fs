@@ -60,15 +60,19 @@ module PieceTemplates =
                 (Map.tryFind colorName colors)
                 (Map.tryFind kindName kinds))
 
+    let private templateFiles path =
+        [| yield! Directory.GetFiles(path, "*.png")
+           yield! Directory.GetFiles(path, "*.bmp") |]
+
+    let private loadTemplate filePath =
+        tryParsePiece filePath
+        |> Option.map (fun piece -> piece, new Bitmap(filePath))
+
     let loadAllFromDirectory (path: string) : (Piece * Bitmap) array =
         if not (Directory.Exists path) then
             Array.empty
         else
-            [| yield! Directory.GetFiles(path, "*.png")
-               yield! Directory.GetFiles(path, "*.bmp") |]
-            |> Array.choose (fun filePath ->
-                tryParsePiece filePath
-                |> Option.map (fun piece -> piece, new Bitmap(filePath)))
+            templateFiles path |> Array.choose loadTemplate
 
     let loadFromDirectory (path: string) : Map<Piece, Bitmap> =
         loadAllFromDirectory path |> Map.ofArray
@@ -107,6 +111,9 @@ module PieceBitmap =
 module PieceTemplateCalibration =
     let private startingPosition = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
 
+    let private startingBoard =
+        Fen.parseBoard startingPosition |> Result.defaultValue Map.empty
+
     let private kindNames =
         Map.ofList [ King, "king"; Queen, "queen"; Rook, "rook"; Bishop, "bishop"; Knight, "knight"; Pawn, "pawn" ]
 
@@ -126,13 +133,11 @@ module PieceTemplateCalibration =
             1
 
     let saveStartingPositionTemplates (bitmap: Bitmap) (geometry: BoardGeometry) (path: string) =
-        match Fen.parseBoard startingPosition with
-        | Error _ -> 0
-        | Ok board ->
-            Directory.CreateDirectory path |> ignore
-            board
-            |> Map.toSeq
-            |> Seq.sumBy (fun (square, piece) -> saveTemplate bitmap geometry path square piece)
+        Directory.CreateDirectory path |> ignore
+
+        startingBoard
+        |> Map.toSeq
+        |> Seq.sumBy (fun (square, piece) -> saveTemplate bitmap geometry path square piece)
 
 module BackgroundIsolation =
     // Every piece is drawn with a dark enclosing outline. A captured square is
@@ -143,8 +148,6 @@ module BackgroundIsolation =
     // reach is the piece. Marking the reached pixels transparent isolates the
     // piece from whatever square it happens to sit on.
     let private darkThreshold = 90.0
-
-    let private luminance (r: float) (g: float) (b: float) = (r + g + b) / 3.0
 
     let private scanForTransparentPixel (bytes: byte[]) =
         let mutable found = false
@@ -230,7 +233,7 @@ module BackgroundIsolation =
 
             let isBackground x y =
                 let o = offsetOf x y
-                luminance (float bytes[o + 2]) (float bytes[o + 1]) (float bytes[o]) >= darkThreshold
+                (float bytes[o + 2] + float bytes[o + 1] + float bytes[o]) / 3.0 >= darkThreshold
 
             let visited = Array.zeroCreate<bool> (w * h)
             let queue = System.Collections.Generic.Queue<struct (int * int)>()
@@ -402,7 +405,7 @@ module SimilarityComparison =
 
         top * (1.0 - yWeight) + bottom * yWeight
 
-    let private withGrayscaleSource (bitmap: Bitmap) (_geometry: BoardGeometry) action =
+    let private readGrayscaleSource (bitmap: Bitmap) =
         let bounds = Rectangle(0, 0, bitmap.Width, bitmap.Height)
         let data = bitmap.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
 
@@ -413,16 +416,14 @@ module SimilarityComparison =
             for row in 0 .. bounds.Height - 1 do
                 Marshal.Copy(IntPtr.Add(data.Scan0, row * data.Stride), bytes, row * stride, stride)
 
-            action (
-                Some
-                    {
-                        OriginX = bounds.X
-                        OriginY = bounds.Y
-                        Width = bounds.Width
-                        Height = bounds.Height
-                        Stride = stride
-                        Bytes = bytes
-                    })
+            {
+                OriginX = bounds.X
+                OriginY = bounds.Y
+                Width = bounds.Width
+                Height = bounds.Height
+                Stride = stride
+                Bytes = bytes
+            }
         finally
             bitmap.UnlockBits(data)
 
@@ -454,18 +455,18 @@ module SimilarityComparison =
             |> blur)
 
     let readSquareGrayscaleSamples (bitmap: Bitmap) (geometry: BoardGeometry) =
-        withGrayscaleSource bitmap geometry (function
-            | None -> []
-            | Some source ->
-                Squares.all
-                |> List.choose (fun square ->
-                    toGrayscaleArrayFromSource source bitmap geometry square
-                    |> Option.map (fun gray -> square, gray)))
+        let source = readGrayscaleSource bitmap
+
+        [ for square in Squares.all do
+              match toGrayscaleArrayFromSource source bitmap geometry square with
+              | Some gray -> square, gray
+              | None -> () ]
 
     // A template is reduced to its grayscale samples plus a mask marking which
     // samples belong to the piece (vs the transparent/isolated background). The
     // mask lets matching ignore whatever colour the live square happens to be.
     let private minPieceFraction = 0.1
+    let private minComparedPixels = 16
 
     let private readScaledGrayAndMask (source: Bitmap) =
         use scaled = new Bitmap(sampleSize, sampleSize, PixelFormat.Format32bppArgb)
@@ -506,7 +507,13 @@ module SimilarityComparison =
         if float pieceCount < float (sampleSize * sampleSize) * minPieceFraction then
             blur gray, Array.create (sampleSize * sampleSize) true
         else
-            maskedBlur gray rawMask, erodeMask rawMask
+            let erodedMask = erodeMask rawMask
+            let erodedCount = erodedMask |> Array.sumBy (fun m -> if m then 1 else 0)
+
+            if erodedCount < minComparedPixels then
+                blur gray, rawMask
+            else
+                maskedBlur gray rawMask, erodedMask
 
     let toGrayscaleAndMask (bitmap: Bitmap) : float[] * bool[] =
         let isolated =
@@ -538,12 +545,9 @@ module SimilarityComparison =
                 totalSquared <- totalSquared + value * value
                 count <- count + 1
 
-        if count = 0 then
-            0.0
-        else
-            let mean = total / float count
-            let variance = max 0.0 (totalSquared / float count - mean * mean)
-            sqrt variance
+        let mean = total / float count
+        let variance = max 0.0 (totalSquared / float count - mean * mean)
+        sqrt variance
 
     // Correlation of the centre region against its own vertical mirror. A
     // move-hint / premove dot is a filled disk, symmetric about the square's
@@ -583,12 +587,9 @@ module SimilarityComparison =
         let centerEnd = sampleSize - centerStart
         let topSum, bottomSum, count = verticalSymmetrySums sample centerStart centerEnd
 
-        if count = 0 then
-            1.0
-        else
-            let topMean = topSum / float count
-            let bottomMean = bottomSum / float count
-            verticalSymmetryNcc sample centerStart centerEnd topMean bottomMean
+        let topMean = topSum / float count
+        let bottomMean = bottomSum / float count
+        verticalSymmetryNcc sample centerStart centerEnd topMean bottomMean
 
     // A move-hint / premove dot is a round disk, so among the pieces it can only
     // resemble a pawn (the one compact, rounded silhouette) and the matcher duly
@@ -606,8 +607,6 @@ module SimilarityComparison =
     // template against the sample at a small range of integer offsets and keep
     // the best correlation, restoring alignment without re-cropping.
     let searchRadius = 3
-
-    let private minComparedPixels = 16
 
     let private nccSumPass (template: float[]) (mask: bool[]) (sample: float[]) xStart xEnd yStart yEnd dx dy =
         let mutable count = 0
@@ -650,26 +649,23 @@ module SimilarityComparison =
         let yEnd = min sampleSize (sampleSize - dy)
         let count, tsum, ssum = nccSumPass template mask sample xStart xEnd yStart yEnd dx dy
 
-        if count < minComparedPixels then
+        let tmean = tsum / float count
+        let smean = ssum / float count
+        let num, tsq, ssq = nccCorrelationPass template mask sample xStart xEnd yStart yEnd dx dy tmean smean
+
+        if tsq < 1.0 || ssq < 1.0 then
             0.0
         else
-            let tmean = tsum / float count
-            let smean = ssum / float count
-            let num, tsq, ssq = nccCorrelationPass template mask sample xStart xEnd yStart yEnd dx dy tmean smean
-
-            if tsq < 1.0 || ssq < 1.0 then
-                0.0
-            else
-                let shape = num / sqrt (tsq * ssq)
-                // Zero-mean correlation is invariant to contrast magnitude, so a
-                // bright white piece and a dark black piece of the same shape
-                // correlate equally well. Scaling by how closely their contrasts
-                // match restores the light/dark distinction while staying
-                // invariant to board colour and lighting.
-                let tStd = sqrt (tsq / float count)
-                let sStd = sqrt (ssq / float count)
-                let contrastAgreement = min tStd sStd / max tStd sStd
-                shape * contrastAgreement
+            let shape = num / sqrt (tsq * ssq)
+            // Zero-mean correlation is invariant to contrast magnitude, so a
+            // bright white piece and a dark black piece of the same shape
+            // correlate equally well. Scaling by how closely their contrasts
+            // match restores the light/dark distinction while staying
+            // invariant to board colour and lighting.
+            let tStd = sqrt (tsq / float count)
+            let sStd = sqrt (ssq / float count)
+            let contrastAgreement = min tStd sStd / max tStd sStd
+            shape * contrastAgreement
 
     let private nccTolerant (template: float[]) (mask: bool[]) (sample: float[]) =
         let mutable best = -1.0
@@ -763,40 +759,33 @@ type TemplateBoardReader(templates: seq<Piece * Bitmap>, fieldTemplates: seq<Bit
 
                 for square, squareGray in SimilarityComparison.readSquareGrayscaleSamples bitmap geometry do
                     let presenceScore = SimilarityComparison.piecePresenceScore squareGray
+                    let rankedMatches = SimilarityComparison.rankMatches preparedTemplates squareGray
 
-                    if presenceScore < piecePresenceThreshold then
-                        candidates <- Map.add square [] candidates
-                    else
-                        let rankedMatches = SimilarityComparison.rankMatches preparedTemplates squareGray
+                    let squareCandidates =
+                        rankedMatches
+                        |> List.truncate 3
+                        |> List.map (fun (piece, score) -> { Piece = piece; Score = score })
 
-                        let squareCandidates =
-                            rankedMatches
-                            |> List.truncate 3
-                            |> List.map (fun (piece, score) -> { Piece = piece; Score = score })
+                    candidates <- Map.add square squareCandidates candidates
 
-                        candidates <- Map.add square squareCandidates candidates
+                    // Let the field (move-hint dot) templates compete with the
+                    // pieces: when a dot reference matches this square better
+                    // than any piece, the square is an empty highlight, not a
+                    // piece, so leave it unoccupied.
+                    let bestPieceScore = rankedMatches |> List.head |> snd
 
-                        // Let the field (move-hint dot) templates compete with the
-                        // pieces: when a dot reference matches this square better
-                        // than any piece, the square is an empty highlight, not a
-                        // piece, so leave it unoccupied.
-                        let bestPieceScore =
-                            match rankedMatches with
-                            | (_, score) :: _ -> score
-                            | [] -> -1.0
+                    let isField =
+                        SimilarityComparison.bestMatchScore preparedFieldTemplates squareGray >= bestPieceScore
 
-                        let isField =
-                            SimilarityComparison.bestMatchScore preparedFieldTemplates squareGray >= bestPieceScore
+                    match SimilarityComparison.tryAcceptBestCandidate threshold rankedMatches with
+                    | Some(piece, score) when not isField ->
+                        let presentEnough =
+                            presenceScore >= piecePresenceThreshold || score >= threshold
 
-                        match SimilarityComparison.tryAcceptBestCandidate threshold rankedMatches with
-                        | Some(piece, score) when not isField ->
-                            let presentEnough =
-                                presenceScore >= piecePresenceThreshold || score >= threshold
-
-                            if presentEnough && not (SimilarityComparison.looksLikeMoveHintDot piece squareGray) then
-                                board <- Map.add square piece board
-                                matchCount <- matchCount + 1
-                        | _ -> ()
+                        if presentEnough && not (SimilarityComparison.looksLikeMoveHintDot piece squareGray) then
+                            board <- Map.add square piece board
+                            matchCount <- matchCount + 1
+                    | _ -> ()
 
                 let confidence =
                     if matchCount = 0 then 0.0

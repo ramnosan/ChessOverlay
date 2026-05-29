@@ -8,9 +8,7 @@ open ChessOverlay.Quality.MutationTesting
 
 module MutationTestingTests =
     let private tempRoot () =
-        let root = Path.Combine(Path.GetTempPath(), "ChessOverlayMutationTests", Guid.NewGuid().ToString("N"))
-        Directory.CreateDirectory(root) |> ignore
-        root
+        TestHelpers.tempRoot "ChessOverlayMutationTests"
 
     let private mutantsFor line =
         MutationTesting.mutantsForLine "Sample.fs" 1 line

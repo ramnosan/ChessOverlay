@@ -5,6 +5,48 @@ open System.Diagnostics.CodeAnalysis
 open System.Drawing
 open System.Windows.Forms
 
+module internal ChromeBoardSelection =
+
+    type ScanView =
+        { Status: string
+          Boards: ChromeBoardDetector.DetectedBoard list
+          Items: string list
+          SelectSingleBoard: bool }
+
+    let private emptyView status =
+        { Status = status
+          Boards = []
+          Items = []
+          SelectSingleBoard = false }
+
+    let private boardHost (url: string) =
+        try
+            Uri(url).Host
+        with _ ->
+            url
+
+    let private boardItemText (board: ChromeBoardDetector.DetectedBoard) =
+        sprintf "%s  —  %s  (%d px)" board.Tab.Title (boardHost board.Tab.Url) board.Geometry.Size
+
+    let private boardsView boards =
+        { Status = sprintf "Found %d chess board(s). Select one and click Use." (List.length boards)
+          Boards = boards
+          Items = boards |> List.map boardItemText
+          SelectSingleBoard = List.length boards = 1 }
+
+    let private noBoardsView () =
+        emptyView
+            "No chess boards detected in Chrome.\n\nOpen a game on chess.com or lichess.org and click Refresh."
+
+    let private viewForBoards boards =
+        if List.isEmpty boards then noBoardsView () else boardsView boards
+
+    let viewForResult result =
+        result |> Result.map viewForBoards |> Result.defaultWith emptyView
+
+    let viewForException (ex: exn) =
+        emptyView (sprintf "Detection failed: %s" ex.Message)
+
 [<ExcludeFromCodeCoverage>]
 type ChromeBoardSelectionDialog() as this =
     inherit Form()
@@ -38,53 +80,52 @@ type ChromeBoardSelectionDialog() as this =
 
     let updateStatus msg = statusLabel.Text <- msg
 
-    let scan () =
+    let beginOnUiThread action =
+        if this.IsHandleCreated && not this.IsDisposed then
+            try
+                this.BeginInvoke(
+                    Action(fun () ->
+                        try
+                            if not this.IsDisposed then
+                                action ()
+                        with
+                        | :? ObjectDisposedException
+                        | :? InvalidOperationException -> ()))
+                |> ignore
+            with
+            | :? ObjectDisposedException
+            | :? InvalidOperationException -> ()
+
+    let prepareForScan () =
         updateStatus "Scanning Chrome tabs for chess boards..."
         listBox.Items.Clear()
         detectedBoards <- []
         useButton.Enabled <- false
         refreshButton.Enabled <- false
 
+    let applyScanView (view: ChromeBoardSelection.ScanView) =
+        refreshButton.Enabled <- true
+        detectedBoards <- view.Boards
+        listBox.Items.Clear()
+
+        for item in view.Items do
+            listBox.Items.Add item |> ignore
+
+        if view.SelectSingleBoard then
+            listBox.SelectedIndex <- 0
+
+        useButton.Enabled <- listBox.SelectedIndex >= 0
+        updateStatus view.Status
+
+    let scan () =
+        prepareForScan ()
+
         Async.StartWithContinuations(
             ChromeBoardDetector.detectBoards (),
             (fun result ->
-                if not this.IsDisposed then
-                    this.BeginInvoke(
-                        Action(fun () ->
-                            refreshButton.Enabled <- true
-
-                            match result with
-                            | Error msg -> updateStatus msg
-                            | Ok [] ->
-                                updateStatus
-                                    "No chess boards detected in Chrome.\n\nOpen a game on chess.com or lichess.org and click Refresh."
-                            | Ok boards ->
-                                detectedBoards <- boards
-
-                                for board in boards do
-                                    let host =
-                                        try
-                                            Uri(board.Tab.Url).Host
-                                        with _ ->
-                                            board.Tab.Url
-
-                                    listBox.Items.Add(
-                                        sprintf "%s  —  %s  (%d px)" board.Tab.Title host board.Geometry.Size)
-                                    |> ignore
-
-                                if boards.Length = 1 then
-                                    listBox.SelectedIndex <- 0
-
-                                updateStatus (
-                                    sprintf "Found %d chess board(s). Select one and click Use." boards.Length)))
-                    |> ignore),
+                beginOnUiThread (fun () -> result |> ChromeBoardSelection.viewForResult |> applyScanView)),
             (fun ex ->
-                if not this.IsDisposed then
-                    this.BeginInvoke(
-                        Action(fun () ->
-                            refreshButton.Enabled <- true
-                            updateStatus (sprintf "Detection failed: %s" ex.Message)))
-                    |> ignore),
+                beginOnUiThread (fun () -> ex |> ChromeBoardSelection.viewForException |> applyScanView)),
             (fun _ -> ()))
 
     do

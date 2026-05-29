@@ -37,6 +37,7 @@ type BoardGeometry =
         Size: int
     }
 
+    [<System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage>]
     member this.SquareSize = float this.Size / 8.0
 
     member this.GetSquareRectangle(square: Square) =
@@ -175,13 +176,12 @@ module Fen =
             if ranks.Length <> 8 then
                 Error "FEN board placement must contain 8 ranks."
             else
-                ranks
-                |> Array.mapi (fun index rank -> index, rank)
-                |> Array.fold
-                    (fun state (rankIndex, rank) ->
-                        state
-                        |> Result.bind (parseRank rankIndex rank))
-                    (Ok Map.empty)
+                let mutable state = Ok Map.empty
+
+                for rankIndex in 0 .. ranks.Length - 1 do
+                    state <- state |> Result.bind (parseRank rankIndex ranks[rankIndex])
+
+                state
 
     let private kindChars =
         pieceKinds

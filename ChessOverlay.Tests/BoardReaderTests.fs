@@ -5,11 +5,6 @@ open Xunit
 open ChessOverlay
 
 module BoardReaderTests =
-    let private boardFromFen fen =
-        match Fen.parseBoard fen with
-        | Ok board -> board
-        | Error message -> failwith message
-
     type private FixedBoardReader(reading: BoardReading option) =
         interface IBoardReader with
             member _.Read(_, _) = reading
@@ -87,10 +82,22 @@ module BoardReaderTests =
         Assert.True(reader.Read(bitmap, geometry) |> Option.isNone)
 
     [<Fact>]
+    let ``FallbackBoardReader exposes primary DOM reader when available`` () =
+        let reading =
+            BoardReaderHelpers.readingFromFenWithStrategy "Chrome DOM" "8/8/8/8/8/8/8/4K3 w - - 0 1"
+            |> Option.get
+
+        let reader =
+            FallbackBoardReader(FixedDomBoardReader(Some reading, true), UncertainBoardReader()) :> IDomBoardReader
+
+        Assert.True(reader.IsDomAvailable)
+        Assert.Equal(Some reading, reader.ReadDom())
+
+    [<Fact>]
     let ``LastBoardStateReader saves successful live readings`` () =
         use bitmap = new Bitmap(20, 20)
         let geometry = { Left = 0; Top = 0; Size = 20 }
-        let expected = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+        let expected = TestHelpers.boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
         let live = FenBoardReader("8/8/8/8/8/8/4K3/8 w - - 0 1") :> IBoardReader
         let mutable saved = None
         let reader = LastBoardStateReader(live, (fun () -> None), (fun board -> saved <- Some board)) :> IBoardReader
@@ -105,7 +112,7 @@ module BoardReaderTests =
     let ``LastBoardStateReader loads saved board when live reading is unavailable`` () =
         use bitmap = new Bitmap(20, 20)
         let geometry = { Left = 0; Top = 0; Size = 20 }
-        let savedBoard = boardFromFen "8/8/8/8/3q4/8/4K3/8 w - - 0 1"
+        let savedBoard = TestHelpers.boardFromFen "8/8/8/8/3q4/8/4K3/8 w - - 0 1"
         let live = UncertainBoardReader() :> IBoardReader
         let reader = LastBoardStateReader(live, (fun () -> Some savedBoard), ignore) :> IBoardReader
 
@@ -120,8 +127,8 @@ module BoardReaderTests =
     let ``LastBoardStateReader loads saved board when live reading has low confidence`` () =
         use bitmap = new Bitmap(20, 20)
         let geometry = { Left = 0; Top = 0; Size = 20 }
-        let lowConfidenceBoard = boardFromFen "8/8/8/8/8/8/4k3/8 w - - 0 1"
-        let savedBoard = boardFromFen "8/8/8/8/3q4/8/4K3/8 w - - 0 1"
+        let lowConfidenceBoard = TestHelpers.boardFromFen "8/8/8/8/8/8/4k3/8 w - - 0 1"
+        let savedBoard = TestHelpers.boardFromFen "8/8/8/8/3q4/8/4K3/8 w - - 0 1"
 
         let live =
             FixedBoardReader(
@@ -146,8 +153,8 @@ module BoardReaderTests =
 
     [<Fact>]
     let ``LastBoardStateReader exposes available DOM readings without saved fallback`` () =
-        let highConfidenceBoard = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
-        let lowConfidenceBoard = boardFromFen "8/8/8/8/8/8/4k3/8 w - - 0 1"
+        let highConfidenceBoard = TestHelpers.boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+        let lowConfidenceBoard = TestHelpers.boardFromFen "8/8/8/8/8/8/4k3/8 w - - 0 1"
         let mutable saved = None
 
         let highConfidenceReading =
@@ -201,7 +208,7 @@ module BoardReaderTests =
         let geometry = { Left = 10; Top = 20; Size = 400 }
         let reading =
             {
-                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Board = TestHelpers.boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
                 Confidence = 1.0
                 Candidates = Map.empty
                 Strategy = "Chrome DOM"
@@ -217,13 +224,13 @@ module BoardReaderTests =
         let movedGeometry = { geometry with Left = 11 }
         let reading =
             {
-                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Board = TestHelpers.boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
                 Confidence = 1.0
                 Candidates = Map.empty
                 Strategy = "Chrome DOM"
             }
         let changedReading =
-            { reading with Board = boardFromFen "8/8/8/8/8/8/5K2/8 w - - 0 1" }
+            { reading with Board = TestHelpers.boardFromFen "8/8/8/8/8/8/5K2/8 w - - 0 1" }
 
         let lastKey = ChromeDomRenderDelta.tryKey geometry reading
 
@@ -235,7 +242,7 @@ module BoardReaderTests =
         let geometry = { Left = 10; Top = 20; Size = 400 }
         let reading =
             {
-                Board = boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
+                Board = TestHelpers.boardFromFen "8/8/8/8/8/8/4K3/8 w - - 0 1"
                 Confidence = 1.0
                 Candidates = Map.empty
                 Strategy = "Template"

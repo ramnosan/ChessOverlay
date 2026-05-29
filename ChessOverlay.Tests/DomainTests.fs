@@ -26,6 +26,12 @@ module DomainTests =
         Assert.Equal("h1", Squares.name { File = 7; Rank = 7 })
 
     [<Fact>]
+    let ``All squares includes every rank and file`` () =
+        Assert.Equal(64, Squares.all.Length)
+        Assert.Contains({ File = 0; Rank = 0 }, Squares.all)
+        Assert.Contains({ File = 7; Rank = 7 }, Squares.all)
+
+    [<Fact>]
     let ``Board geometry maps squares to screen rectangles`` () =
         let geometry = { Left = 10; Top = 20; Size = 400 }
         let rectangle = geometry.GetSquareRectangle { File = 2; Rank = 3 }

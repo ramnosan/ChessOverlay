@@ -51,7 +51,22 @@ module AttackCalculatorTests =
     let ``enemyColor picks the colour sitting on top`` () =
         Assert.Equal(Some White, AttackCalculator.enemyColor (parse "3N4/8/8/8/8/8/8/7n w - - 0 1"))
         Assert.Equal(Some Black, AttackCalculator.enemyColor (parse "n7/8/8/8/3N4/8/8/8 w - - 0 1"))
+        Assert.Equal(Some White, AttackCalculator.enemyColor (parse "8/8/8/8/8/8/4K3/8 w - - 0 1"))
         Assert.Equal(None, AttackCalculator.enemyColor (parse "8/8/8/8/8/8/8/8 w - - 0 1"))
+
+    [<Fact>]
+    let ``public attack helpers use default top pawn direction`` () =
+        let square = { File = 3; Rank = 3 }
+        let pawn = { Color = Black; Kind = Pawn }
+        let board = Map.ofList [ square, pawn ]
+
+        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 4 }; { File = 4; Rank = 4 } ], AttackCalculator.attacksForPiece board square pawn)
+        Assert.Equal<Set<Square>>(set [ { File = 2; Rank = 4 }; { File = 4; Rank = 4 } ], AttackCalculator.attackedSquaresByColor board Black)
+        Assert.Equal(2, (AttackCalculator.attackRaysForPiece board square pawn).Length)
+
+    [<Fact>]
+    let ``enemyAttackedSquares returns empty when no enemy color can be inferred`` () =
+        Assert.Empty(AttackCalculator.enemyAttackedSquares Map.empty)
 
     [<Fact>]
     let ``Knight attacks stay inside the board`` () =
@@ -355,6 +370,12 @@ module AttackCalculatorTests =
     [<Fact>]
     let ``friendlyForkMoveArrows returns empty for an empty board`` () =
         let board = parse "8/8/8/8/8/8/8/8 w - - 0 1"
+        Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
+
+    [<Fact>]
+    let ``friendlyForkMoveArrows evaluates bottom pawn advances`` () =
+        let board = parse "k7/8/8/8/8/8/3P4/8 w - - 0 1"
+
         Assert.Empty(AttackCalculator.friendlyForkMoveArrows board)
 
     [<Fact>]

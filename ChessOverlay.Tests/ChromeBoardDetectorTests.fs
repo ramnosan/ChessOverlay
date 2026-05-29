@@ -66,6 +66,22 @@ module ChromeBoardDetectorTests =
         Assert.Equal(None, ChromeBoardDetector.parseFen "")
 
     [<Fact>]
+    let ``parseFen reads the fen from a visible-tab object (hidden false)`` () =
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        let json =
+            sprintf """{"id":1,"result":{"result":{"value":{"fen":"%s","hidden":false}}}}""" fen
+        Assert.Equal(Some fen, ChromeBoardDetector.parseFen json)
+
+    [<Fact>]
+    let ``parseFen returns None when the tab is minimized (document.hidden)`` () =
+        // The game object still exposes the FEN while minimized, so the hidden flag
+        // is what must suppress the fallback reading.
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        let json =
+            sprintf """{"id":1,"result":{"result":{"value":{"fen":"%s","hidden":true}}}}""" fen
+        Assert.Equal(None, ChromeBoardDetector.parseFen json)
+
+    [<Fact>]
     let ``parseBoardReading extracts chess com piece classes for white orientation`` () =
         let json =
             """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[{"piece":"wk","square":"51"},{"piece":"bp","square":"48"}]}}}}"""
@@ -116,6 +132,25 @@ module ChromeBoardDetectorTests =
             """{"id":1,"result":{"result":{"value":{"orientation":"white","pieces":[{"piece":"xx","square":"11"},{"piece":"wz","square":"21"},{"piece":"wp","square":"99"}]}}}}"""
 
         Assert.Equal(None, ChromeBoardDetector.parseBoardReading json)
+
+    [<Fact>]
+    let ``parseBoardReading returns None when the tab is minimized (document.hidden)`` () =
+        // A minimized or background tab still has the pieces in its DOM, but
+        // document.hidden = true means the board is not visible on screen.
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"white","hidden":true,"pieces":[{"piece":"wk","square":"51"},{"piece":"bp","square":"48"}]}}}}"""
+
+        Assert.Equal(None, ChromeBoardDetector.parseBoardReading json)
+
+    [<Fact>]
+    let ``parseBoardReading reads the board when the tab is visible (hidden false)`` () =
+        let json =
+            """{"id":1,"result":{"result":{"value":{"orientation":"white","hidden":false,"pieces":[{"piece":"wk","square":"51"}]}}}}"""
+
+        match ChromeBoardDetector.parseBoardReading json with
+        | Some reading ->
+            Assert.Equal(Some { Color = White; Kind = King }, BoardState.tryPieceAt { File = 4; Rank = 7 } reading.Board)
+        | None -> failwith "Expected a reading for a visible tab."
 
     [<Fact>]
     let ``parseBoardReading returns None for null or empty results`` () =

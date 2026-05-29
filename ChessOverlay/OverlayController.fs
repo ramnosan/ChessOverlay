@@ -31,6 +31,15 @@ module internal ChromeDomRenderDelta =
         | Some key -> Some key <> lastKey
         | None -> true
 
+module internal ChromeOverlayVisibility =
+    /// When a DOM (Chrome tab) reader is active but returns no reading, the tab is
+    /// minimized, backgrounded, closed, or navigated away from the board — it is no
+    /// longer visible on screen. The overlay must then be cleared completely: leaving
+    /// a stale board outline or piece labels would float over unrelated content.
+    ///
+    let shouldClearOverlay (domReaderActive: bool) (domReading: BoardReading option) : bool =
+        domReaderActive && domReading.IsNone
+
 [<ExcludeFromCodeCoverage>]
 type OverlayController(
     initialGeometry: BoardGeometry option,
@@ -197,6 +206,9 @@ type OverlayController(
 
                 match domReading with
                 | Some reading -> renderReading generation screenGeometry (Some reading)
+                | None when ChromeOverlayVisibility.shouldClearOverlay domReader.IsSome domReading ->
+                    lastChromeDomRenderKey <- None
+                    measure "overlay-clear" (fun () -> updateOverlay generation overlay.ClearFrame)
                 | None when shouldRunScreenScan () ->
                     let capturedBitmap, origin = measure "capture" ScreenCapture.captureVirtualScreen
                     use capture = capturedBitmap

@@ -10,9 +10,7 @@ module DryDuplicationTests =
     let private consoleLock = obj ()
 
     let private tempRoot () =
-        let root = Path.Combine(Path.GetTempPath(), "ChessOverlayDryTests", Guid.NewGuid().ToString("N"))
-        Directory.CreateDirectory(root) |> ignore
-        root
+        TestHelpers.tempRoot "ChessOverlayDryTests"
 
     let private writeFile root relativePath (lines: string list) =
         let path = Path.Combine(root, relativePath)
@@ -22,15 +20,7 @@ module DryDuplicationTests =
         path
 
     let private repositoryRoot () =
-        let rec loop (directory: DirectoryInfo) =
-            if File.Exists(Path.Combine(directory.FullName, "ChessOverlay.slnx")) then
-                directory.FullName
-            elif isNull directory.Parent then
-                Directory.GetCurrentDirectory()
-            else
-                loop directory.Parent
-
-        loop (DirectoryInfo(Directory.GetCurrentDirectory()))
+        TestHelpers.repositoryRoot ()
 
     let private defaultOptions root =
         {
